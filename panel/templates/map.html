@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+{% block title %}User Map — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}User Map{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  /* Override main-content overflow so the map fills available space */
+  .main-content { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+
+  #mapWrap {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  #mapToolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  #mapTitle {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  #mapStats {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  #mapContainer {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+  }
+
+  #map {
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+  }
+
+  /* Country table panel */
+  #countryPanel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 220px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    overflow: hidden;
+    max-height: calc(100% - 24px);
+    display: flex;
+    flex-direction: column;
+  }
+
+  #countryPanelHeader {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .7px;
+    color: var(--text-3);
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  #countryList {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .country-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    transition: background .1s;
+    cursor: default;
+  }
+  .country-row:last-child { border-bottom: none; }
+  .country-row:hover { background: var(--bg-2); }
+
+  .country-flag {
+    width: 20px;
+    height: 15px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    object-fit: cover;
+  }
+  .country-flag-placeholder {
+    width: 20px;
+    height: 15px;
+    border-radius: 2px;
+    background: var(--bg-3);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    color: var(--text-3);
+  }
+
+  .country-name {
+    flex: 1;
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .country-count {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 500;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+  .country-bar {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: var(--accent-dim);
+    z-index: -1;
+    transition: width .3s ease;
+  }
+  .country-row { position: relative; }
+
+  /* Legend */
+  #mapLegend {
+    position: absolute;
+    bottom: 28px;
+    left: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    z-index: 1000;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text-3);
+    box-shadow: var(--shadow);
+  }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .legend-row:last-child { margin-bottom: 0; }
+  .legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* Leaflet tooltip override */
+  .leaflet-tooltip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    box-shadow: var(--shadow-lg);
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+  .leaflet-tooltip::before { display: none; }
+
+  .tt-country { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+  .tt-count { color: var(--accent); }
+  .tt-nicks { color: var(--text-3); margin-top: 3px; font-size: 11px; }
+
+  @media (max-width: 768px) {
+    #countryPanel { width: 160px; }
+    #mapToolbar { padding: 10px 14px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="mapWrap">
+  <div id="mapToolbar">
+    <span id="mapTitle">User Distribution</span>
+    <span id="mapStats">loading…</span>
+    <button class="btn btn-ghost btn-sm" onclick="loadMap()" style="margin-left:auto">↻ Refresh</button>
+  </div>
+
+  <div id="mapContainer">
+    <div id="map"></div>
+
+    <div id="countryPanel">
+      <div id="countryPanelHeader">By Country</div>
+      <div id="countryList">
+        <div class="country-row"><span class="text-muted" style="font-size:11px">loading…</span></div>
+      </div>
+    </div>
+
+    <div id="mapLegend">
+      <div class="legend-row"><div class="legend-swatch" style="background:#e8f0ff"></div><span>1 user</span></div>
+      <div class="legend-row"><div class="legend-swatch" style="background:#93b4f5"></div><span>few</span></div>
+      <div class="legend-row"><div class="legend-swatch" style="background:#3d6dd4"></div><span>many</span></div>
+      <div class="legend-row"><div class="legend-swatch" style="background:#0a2d8a"></div><span>most</span></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ── Colour scale ─────────────────────────────────────────────────────────
+// Light → dark blue, adapts to both themes
+const LIGHT_STEPS = ['#e8f0ff','#b8ccf8','#7fa8ee','#4d7dd4','#1a52b8','#0a2d8a'];
+const DARK_STEPS  = ['#0d1f47','#152e6a','#1e448e','#2b5cad','#3d76cc','#5a96e8'];
+
+function getSteps() {
+  return document.documentElement.getAttribute('data-theme') === 'dark'
+    ? DARK_STEPS : LIGHT_STEPS;
+}
+
+function countryColor(count, max) {
+  if (!count || !max) return 'transparent';
+  const steps = getSteps();
+  const idx = Math.min(
+    steps.length - 1,
+    Math.ceil((count / max) * steps.length) - 1 + (count > 0 ? 1 : 0)
+  );
+  return steps[Math.max(0, idx)];
+}
+
+// ── Map init ─────────────────────────────────────────────────────────────
+const isDark = () => document.documentElement.getAttribute('data-theme') === 'dark';
+
+const tileLight = 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png';
+const tileDark  = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png';
+const tileAttr  = '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://osm.org/copyright">OSM</a>';
+
+const map = L.map('map', {
+  center: [20, 10],
+  zoom: 2,
+  minZoom: 1,
+  maxZoom: 6,
+  zoomControl: true,
+  attributionControl: true,
+});
+
+let tileLayer = L.tileLayer(isDark() ? tileDark : tileLight, {
+  attribution: tileAttr, subdomains: 'abcd', maxZoom: 20,
+}).addTo(map);
+
+let geoLayer = null;
+let geoData  = null;   // cached GeoJSON
+let userData = null;   // cached geo API response
+
+// ── Load GeoJSON once ────────────────────────────────────────────────────
+async function loadGeoJson() {
+  if (geoData) return geoData;
+  // Natural Earth 110m countries — small, widely cached
+  const r = await fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson');
+  geoData = await r.json();
+  return geoData;
+}
+
+// ── Main load ─────────────────────────────────────────────────────────────
+async function loadMap() {
+  document.getElementById('mapStats').textContent = 'loading…';
+  try {
+    const [geo, data] = await Promise.all([
+      loadGeoJson(),
+      Panel.apiGet('/api/users/geo'),
+    ]);
+    userData = data;
+    renderMap(geo, data);
+    renderCountryList(data);
+  } catch(e) {
+    document.getElementById('mapStats').textContent = 'Error: ' + e.message;
+  }
+}
+
+function renderMap(geo, data) {
+  const countries = data.countries || {};
+  const max = Math.max(1, ...Object.values(countries).map(c => c.count));
+
+  document.getElementById('mapStats').textContent =
+    data.total + ' users · ' + Object.keys(countries).filter(k=>k!=='??').length + ' countries' +
+    (data.local ? ' · ' + data.local + ' local' : '');
+
+  if (geoLayer) { geoLayer.remove(); geoLayer = null; }
+
+  geoLayer = L.geoJSON(geo, {
+    style: feature => {
+      // Natural Earth uses ISO_A2 — fall back to ADM0_A3_IS first 2 chars
+      const cc = feature.properties.ISO_A2 || '';
+      const entry = countries[cc];
+      return {
+        fillColor:   entry ? countryColor(entry.count, max) : 'transparent',
+        fillOpacity: entry ? 0.85 : 0,
+        color:       'var(--border)',
+        weight:      0.5,
+        opacity:     0.6,
+      };
+    },
+    onEachFeature: (feature, layer) => {
+      const cc    = feature.properties.ISO_A2 || '';
+      const entry = countries[cc];
+      if (!entry) return;
+
+      const name  = entry.country_name || feature.properties.NAME || cc;
+      const nicks = entry.nicks.slice(0,8).join(', ') + (entry.nicks.length === 10 ? '…' : '');
+      layer.bindTooltip(`
+        <div class="tt-country">${name}</div>
+        <div class="tt-count">${entry.count} user${entry.count===1?'':'s'}</div>
+        ${nicks ? '<div class="tt-nicks">' + nicks + '</div>' : ''}
+      `, { sticky: true, opacity: 1 });
+
+      layer.on('mouseover', function() { this.setStyle({ fillOpacity: 1, weight: 1.5 }); });
+      layer.on('mouseout',  function() { geoLayer.resetStyle(this); });
+    },
+  }).addTo(map);
+
+  // Update legend colors for current theme
+  const steps = getSteps();
+  const swatches = document.querySelectorAll('.legend-swatch');
+  swatches[0].style.background = steps[1];
+  swatches[1].style.background = steps[2];
+  swatches[2].style.background = steps[4];
+  swatches[3].style.background = steps[5];
+}
+
+function renderCountryList(data) {
+  const countries = data.countries || {};
+  const sorted = Object.entries(countries)
+    .filter(([cc]) => cc !== '??')
+    .sort((a,b) => b[1].count - a[1].count);
+
+  const max = sorted.length ? sorted[0][1].count : 1;
+  const list = document.getElementById('countryList');
+
+  if (!sorted.length) {
+    list.innerHTML = '<div class="country-row"><span class="text-muted" style="font-size:11px">No data</span></div>';
+    return;
+  }
+
+  list.innerHTML = sorted.map(([cc, entry]) => {
+    const pct  = Math.round((entry.count / max) * 100);
+    const flag = cc !== '??' ? `<img class="country-flag" src="https://flagcdn.com/20x15/${cc.toLowerCase()}.png" alt="${cc}">` :
+                               `<div class="country-flag-placeholder">?</div>`;
+    const name = entry.country_name || cc;
+    return `<div class="country-row">
+      <div class="country-bar" style="width:${pct}%"></div>
+      ${flag}
+      <span class="country-name" title="${name}">${name}</span>
+      <span class="country-count">${entry.count}</span>
+    </div>`;
+  }).join('');
+
+  // Unknown bucket
+  if (countries['??']) {
+    const unk = countries['??'];
+    list.innerHTML += `<div class="country-row">
+      <div class="country-bar" style="width:${Math.round((unk.count/max)*100)}%"></div>
+      <div class="country-flag-placeholder">?</div>
+      <span class="country-name">Unknown</span>
+      <span class="country-count">${unk.count}</span>
+    </div>`;
+  }
+}
+
+// ── Theme change → re-render ──────────────────────────────────────────────
+const observer = new MutationObserver(() => {
+  // Swap tile layer
+  tileLayer.remove();
+  tileLayer = L.tileLayer(isDark() ? tileDark : tileLight, {
+    attribution: tileAttr, subdomains: 'abcd', maxZoom: 20,
+  }).addTo(map);
+  // Re-render choropleth with new colors
+  if (geoData && userData) {
+    renderMap(geoData, userData);
+    renderCountryList(userData);
+  }
+});
+observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+// ── Init ─────────────────────────────────────────────────────────────────
+loadMap();
+
+// Auto-refresh every 60s
+setInterval(loadMap, 60000);
+</script>
+{% endblock %}

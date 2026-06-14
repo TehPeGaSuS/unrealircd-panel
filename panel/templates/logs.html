@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Logs — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Live Logs{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Live Logs</div>
+    <div class="page-subtitle" id="logStatus">connecting…</div>
+  </div>
+  <div class="flex gap-8">
+    <button class="btn btn-ghost btn-sm" onclick="clearLog()">✕ Clear</button>
+    <button class="btn btn-ghost btn-sm" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
+  </div>
+</div>
+
+<div class="log-stream" id="logStream">
+  <div class="log-stream-status" id="logConnecting">⟳ connecting to log stream…</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let es = null;
+let paused = false;
+let logCount = 0;
+const MAX_ENTRIES = 500;
+
+const stream  = document.getElementById('logStream');
+const status  = document.getElementById('logStatus');
+const pauseBtn= document.getElementById('pauseBtn');
+
+function formatLogTime(ts) {
+  if (!ts) return new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  try {
+    return new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  } catch { return ts; }
+}
+
+function appendEntry(event) {
+  if (paused) return;
+
+  // Remove connecting placeholder
+  const placeholder = document.getElementById('logConnecting');
+  if (placeholder) placeholder.remove();
+
+  const level = (event.level || 'info').toLowerCase();
+  const msg   = event.msg || event.message || JSON.stringify(event);
+  const ts    = event.timestamp || event.time || null;
+
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `
+    <span class="log-time">${formatLogTime(ts)}</span>
+    <span class="log-level ${level}">${level}</span>
+    <span class="log-msg">${Panel.esc(msg)}</span>
+  `;
+  stream.appendChild(el);
+  logCount++;
+
+  // Trim oldest entries to avoid unbounded growth
+  while (logCount > MAX_ENTRIES) {
+    const first = stream.querySelector('.log-entry');
+    if (first) { first.remove(); logCount--; }
+    else break;
+  }
+
+  // Auto-scroll to bottom
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function connect() {
+  if (es) { es.close(); es = null; }
+
+  status.textContent = 'connecting…';
+  es = new EventSource('/api/logs/stream');
+
+  es.addEventListener('connected', () => {
+    status.textContent = 'live ●';
+    status.style.color = 'var(--green)';
+  });
+
+  es.addEventListener('log', e => {
+    try {
+      appendEntry(JSON.parse(e.data));
+    } catch {}
+  });
+
+  es.addEventListener('error', () => {
+    status.textContent = 'disconnected — reconnecting…';
+    status.style.color = 'var(--red)';
+    // Browser will auto-reconnect SSE; update UI on next 'connected' event
+  });
+}
+
+function clearLog() {
+  stream.querySelectorAll('.log-entry').forEach(el => el.remove());
+  logCount = 0;
+}
+
+function togglePause() {
+  paused = !paused;
+  pauseBtn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+  pauseBtn.classList.toggle('btn-ghost', !paused);
+  pauseBtn.classList.toggle('btn-primary', paused);
+}
+
+// Load past log entries first
+async function loadPastLogs() {
+  try {
+    const entries = await Panel.apiGet('/api/logs');
+    if (Array.isArray(entries)) {
+      entries.slice(-100).forEach(appendEntry);
+    }
+  } catch {}
+}
+
+loadPastLogs().then(connect);
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => { if (es) es.close(); });
+</script>
+{% endblock %}

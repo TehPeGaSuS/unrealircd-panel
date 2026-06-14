@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block title %}Bans — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Bans{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Server Bans</div>
+    <div class="page-subtitle" id="banCount">—</div>
+  </div>
+  {% if can('ban_add') %}
+  <button class="btn btn-primary btn-sm" onclick="Panel.openModal('addBanModal')">+ Add Ban</button>
+  {% endif %}
+</div>
+
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Active Bans</span>
+    <div class="flex gap-8" style="align-items:center">
+      <!-- Batch toolbar — shown only when rows are checked -->
+      <div id="batchToolbar" style="display:none;align-items:center;gap:8px">
+        <span id="batchCount" class="text-muted" style="font-size:12px"></span>
+        {% if can('ban_del') %}
+        <button class="btn btn-danger btn-sm" onclick="batchDelete()">Remove selected</button>
+        {% endif %}
+        <button class="btn btn-ghost btn-sm" onclick="clearSelection()">✕ Clear</button>
+      </div>
+      <input class="search-input" id="banSearch" type="search" placeholder="Filter…">
+    </div>
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr>
+          {% if can('ban_del') %}
+          <th style="width:32px">
+            <input type="checkbox" id="selectAll" title="Select all" style="accent-color:var(--accent)">
+          </th>
+          {% endif %}
+          <th>Type</th>
+          <th data-sort-col="0">Target</th>
+          <th>ID</th>
+          <th>Reason</th>
+          <th>Set by</th>
+          <th data-sort-col="2">Set</th>
+          <th data-sort-col="1">Expires</th>
+          <th data-sort-col="3">Hits</th>
+          <th data-sort-col="4">Last Hit</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="bansTbody">
+        <tr><td colspan="11" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add ban modal -->
+<div class="modal-backdrop" id="addBanModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Add Ban</span>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select class="form-select" id="banType">
+          <option value="gline">G-Line (global)</option>
+          <option value="kline">K-Line (local)</option>
+          <option value="zline">Z-Line (IP block)</option>
+          <option value="gzline">GZ-Line (global IP)</option>
+          <option value="shun">Shun</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Target</label>
+        <input class="form-input" id="banTarget" type="text" placeholder="*@1.2.3.4 or *@*.badhost.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Duration</label>
+        <input class="form-input" id="banDuration" type="text" placeholder="1d / 2w / 0 (permanent)" value="1d">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Reason</label>
+        <input class="form-input" id="banReason" type="text" placeholder="Reason for ban">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal-close>Cancel</button>
+      <button class="btn btn-primary" id="banAddBtn">Add Ban</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit ban modal -->
+<div class="modal-backdrop" id="editBanModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Edit Ban</span>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select class="form-select" id="editBanType">
+          <option value="gline">G-Line (global)</option>
+          <option value="kline">K-Line (local)</option>
+          <option value="zline">Z-Line (IP block)</option>
+          <option value="gzline">GZ-Line (global IP)</option>
+          <option value="shun">Shun</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Target</label>
+        <input class="form-input" id="editBanTarget" type="text">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Duration</label>
+        <input class="form-input" id="editBanDuration" type="text" placeholder="1d / 2w / 0 (permanent)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Reason</label>
+        <input class="form-input" id="editBanReason" type="text">
+      </div>
+      <div style="font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-top:4px">
+        Editing removes the old ban and creates a new one with the updated parameters.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal-close>Cancel</button>
+      <button class="btn btn-primary" id="banEditBtn">Save Changes</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const TYPE_BADGES = {
+  gline:'badge-red', kline:'badge-amber', zline:'badge-red',
+  gzline:'badge-red', shun:'badge-muted', eline:'badge-green',
+};
+const CAN_DEL = {{ 'true' if can('ban_del') else 'false' }};
+const CAN_ADD = {{ 'true' if can('ban_add') else 'false' }};
+
+let banMap = {}; // name+type -> ban object
+
+// ── Selection helpers ────────────────────────────────────────────────────
+function getChecked() {
+  return [...document.querySelectorAll('#bansTbody input[type=checkbox]:checked')];
+}
+
+function updateBatchToolbar() {
+  const checked = getChecked();
+  const toolbar = document.getElementById('batchToolbar');
+  const count   = document.getElementById('batchCount');
+  toolbar.style.display = checked.length ? 'flex' : 'none';
+  count.textContent = checked.length + ' selected';
+  const all = document.getElementById('selectAll');
+  if (all) {
+    const total = document.querySelectorAll('#bansTbody input[type=checkbox]').length;
+    all.indeterminate = checked.length > 0 && checked.length < total;
+    all.checked = total > 0 && checked.length === total;
+  }
+}
+
+function clearSelection() {
+  document.querySelectorAll('#bansTbody input[type=checkbox]').forEach(cb => cb.checked = false);
+  const all = document.getElementById('selectAll');
+  if (all) { all.checked = false; all.indeterminate = false; }
+  updateBatchToolbar();
+}
+
+// ── Load ─────────────────────────────────────────────────────────────────
+async function loadBans() {
+  try {
+    const bans = await Panel.apiGet('/api/bans');
+    document.getElementById('banCount').textContent = `${bans.length} active`;
+    banMap = {};
+    bans.forEach(b => { banMap[(b.name||'') + '|' + (b.type||'')] = b; });
+
+    if (!bans.length) { Panel.renderTable('bansTbody', [], 'No active bans'); return; }
+    const colspan = CAN_DEL ? 11 : 10;
+    Panel.renderTable('bansTbody', bans.map(b => {
+      const type    = b.type || b.type_string || '?';
+      const name    = b.name || '?';
+      const reason  = b.reason || '—';
+      const setBy   = b.set_by || '—';
+      const expires = b.expire_at ? Panel.fmtDate(b.expire_at) : 'permanent';
+      const setAt    = b.set_at ? Panel.fmtDate(b.set_at) : '—';
+      const setAtTs  = b.set_at ? new Date(b.set_at).getTime() : 0;
+      const expireTs = b.expire_at ? new Date(b.expire_at).getTime() : 9999999999999;
+      const banId    = b.id || '';
+      const hits     = b.hits ?? '—';
+      const lastHit  = b.last_hit ? Panel.fmtDate(b.last_hit) : '—';
+      const hitsTs   = typeof b.hits === 'number' ? b.hits : -1;
+      const lastHitTs = b.last_hit ? new Date(b.last_hit).getTime() : 0;
+      const badge   = TYPE_BADGES[type.toLowerCase()] || 'badge-muted';
+      const key     = Panel.esc(name) + '|' + Panel.esc(type);
+      const cbCol   = CAN_DEL
+        ? `<td onclick="event.stopPropagation()"><input type="checkbox" data-key="${key}" style="accent-color:var(--accent)" onchange="updateBatchToolbar()"></td>`
+        : '';
+      const actions = `<div class="flex gap-8">
+        ${CAN_ADD && CAN_DEL ? `<button class="btn btn-ghost btn-sm" onclick="openEditBan('${key}')">edit</button>` : ''}
+        ${CAN_DEL ? `<button class="btn btn-danger btn-sm" onclick="delBan('${Panel.esc(name)}','${Panel.esc(type)}')">remove</button>` : ''}
+      </div>`;
+      return `<tr data-search="${Panel.esc(type)} ${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)} ${Panel.esc(banId)}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${expireTs}" data-sort2="${setAtTs}" data-sort3="${hitsTs}" data-sort4="${lastHitTs}">
+        ${cbCol}
+        <td><span class="badge ${badge}">${Panel.esc(type.toUpperCase())}</span></td>
+        <td class="td-mono td-main">${Panel.esc(name)}</td>
+        <td class="td-mono text-muted" style="font-size:11px" title="${Panel.esc(banId)}">${banId ? `<span style="cursor:help;letter-spacing:.5px">${Panel.esc(banId)}</span>` : '—'}</td>
+        <td class="text-muted">${Panel.esc(reason)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setBy)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
+        <td class="td-mono text-muted">${Panel.esc(expires)}</td>
+        <td class="td-mono text-muted">${hits}</td>
+        <td class="td-mono text-muted">${Panel.esc(lastHit)}</td>
+        <td onclick="event.stopPropagation()">${actions}</td>
+      </tr>`;
+    }));
+    Panel.initTableSearch('banSearch', 'bansTbody');
+    Panel.initSortableTable('bansTbody');
+
+    // Select-all checkbox
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+      selectAll.onchange = () => {
+        document.querySelectorAll('#bansTbody input[type=checkbox]').forEach(cb => {
+          const row = cb.closest('tr');
+          cb.checked = selectAll.checked && (!row || row.style.display !== 'none');
+        });
+        updateBatchToolbar();
+      };
+    }
+  } catch(e) { Panel.tableErrorState('bansTbody', e.message); }
+}
+
+// ── Single delete ─────────────────────────────────────────────────────────
+function delBan(name, type) {
+  Panel.confirm('Remove Ban', `Remove ${type.toUpperCase()} on ${name}?`, async () => {
+    try {
+      await Panel.apiDelete(`/api/bans/${encodeURIComponent(name)}?type=${encodeURIComponent(type)}`);
+      Panel.toast('Ban removed', 'ok');
+      loadBans();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+// ── Batch delete ──────────────────────────────────────────────────────────
+async function batchDelete() {
+  const checked = getChecked();
+  if (!checked.length) return;
+  Panel.confirm('Remove Bans', `Remove ${checked.length} selected ban${checked.length > 1 ? 's' : ''}?`, async () => {
+    const items = checked.map(cb => {
+      const [name, type] = cb.dataset.key.split('|');
+      return { name, type };
+    });
+    try {
+      await Panel.apiPost('/api/bans/batch-delete', { items });
+      Panel.toast(`Removed ${items.length} ban${items.length > 1 ? 's' : ''}`, 'ok');
+      clearSelection();
+      loadBans();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+// ── Edit ban ──────────────────────────────────────────────────────────────
+let editOrigKey = null;
+
+function openEditBan(key) {
+  const b = banMap[key];
+  if (!b) return;
+  editOrigKey = key;
+  document.getElementById('editBanType').value     = b.type || 'gline';
+  document.getElementById('editBanTarget').value   = b.name || '';
+  document.getElementById('editBanDuration').value = b.duration || '1d';
+  document.getElementById('editBanReason').value   = b.reason || '';
+  Panel.openModal('editBanModal');
+}
+
+document.getElementById('banEditBtn').addEventListener('click', async () => {
+  if (!editOrigKey) return;
+  const origBan  = banMap[editOrigKey];
+  const newType  = document.getElementById('editBanType').value;
+  const newName  = document.getElementById('editBanTarget').value.trim();
+  const newDur   = document.getElementById('editBanDuration').value.trim() || '1d';
+  const newReason= document.getElementById('editBanReason').value.trim();
+  if (!newName || !newReason) { Panel.toast('Fill in target and reason', 'error'); return; }
+  try {
+    // Delete old, add new
+    await Panel.apiDelete(`/api/bans/${encodeURIComponent(origBan.name)}?type=${encodeURIComponent(origBan.type)}`);
+    await Panel.apiPost('/api/bans', { name: newName, type: newType, duration: newDur, reason: newReason });
+    Panel.toast('Ban updated', 'ok');
+    Panel.closeModal('editBanModal');
+    loadBans();
+  } catch(e) { Panel.toast(e.message, 'error'); }
+});
+
+// ── Add ban ───────────────────────────────────────────────────────────────
+document.getElementById('banAddBtn').addEventListener('click', async () => {
+  const type     = document.getElementById('banType').value;
+  const name     = document.getElementById('banTarget').value.trim();
+  const duration = document.getElementById('banDuration').value.trim() || '1d';
+  const reason   = document.getElementById('banReason').value.trim();
+  if (!name || !reason) { Panel.toast('Fill in target and reason', 'error'); return; }
+  try {
+    await Panel.apiPost('/api/bans', { name, type, duration, reason });
+    Panel.toast('Ban added', 'ok');
+    Panel.closeModal('addBanModal');
+    loadBans();
+  } catch(e) { Panel.toast(e.message, 'error'); }
+});
+
+loadBans();
+</script>
+{% endblock %}

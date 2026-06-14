@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Ban Exceptions — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Ban Exceptions{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Ban Exceptions <span style="font-size:13px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">(E-Lines)</span></div>
+    <div class="page-subtitle" id="elineCount">—</div>
+  </div>
+  <div class="flex gap-8">
+    <button class="btn btn-ghost btn-sm" onclick="loadElines()">↻ Refresh</button>
+    {% if can('ban_add') %}
+    <button class="btn btn-primary btn-sm" onclick="Panel.openModal('addElineModal')">+ Add Exception</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Active Exceptions</span>
+    <input class="search-input" id="elineSearch" type="search" placeholder="Filter…">
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort-col="0">Mask</th>
+          <th>Exempts from</th>
+          <th>Reason</th>
+          <th>Set by</th>
+          <th data-sort-col="1">Set</th>
+          <th data-sort-col="2">Expires</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="elineTbody">
+        <tr><td colspan="7" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add E-Line modal -->
+<div class="modal-backdrop" id="addElineModal">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <span class="modal-title">Add Ban Exception</span>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="form-group">
+        <label class="form-label">Mask</label>
+        <input class="form-input" id="elineMask" type="text" placeholder="*@1.2.3.4 or *@*.isp.com">
+        <div style="font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-top:4px">
+          Prefix with <code>%</code> for soft ban exemption (identified users only)
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Exempt from <span style="color:var(--text-3);font-weight:400">(select ban types)</span></label>
+        <div id="elineTypes" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Duration <span style="color:var(--text-3);font-weight:400">(leave blank for permanent)</span></label>
+        <input class="form-input" id="elineDuration" type="text" placeholder="1d / 2w / blank = permanent">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Reason</label>
+        <input class="form-input" id="elineReason" type="text" placeholder="Why this host is exempted">
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal-close>Cancel</button>
+      <button class="btn btn-primary" id="elineAddBtn">Add Exception</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Exception type char → label
+const ELINE_TYPES = {
+  k: 'K-Line',
+  G: 'G-Line',
+  z: 'Z-Line',
+  Z: 'GZ-Line',
+  Q: 'Q-Line',
+  s: 'Shun',
+  F: 'Spamfilter',
+  b: 'Blacklist',
+  c: 'Connect Flood',
+  d: 'Handshake',
+  m: 'Max Per IP',
+  r: 'Anti-Random',
+  '8': 'Anti-Mixed-UTF8',
+  v: 'Version Ban',
+};
+
+// Defaults — exempt from the most common ban types
+const DEFAULT_TYPES = ['k','G','z','Z','s'];
+
+const CAN_DEL = {{ 'true' if can('ban_del') else 'false' }};
+
+// ── Build type checkboxes ────────────────────────────────────────────────
+(function() {
+  const wrap = document.getElementById('elineTypes');
+  wrap.innerHTML = Object.entries(ELINE_TYPES).map(([char, label]) => `
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;
+                  background:var(--bg-2);border:1px solid var(--border);border-radius:4px;
+                  padding:5px 10px;white-space:nowrap">
+      <input type="checkbox" value="${char}" style="accent-color:var(--accent)"
+             ${DEFAULT_TYPES.includes(char) ? 'checked' : ''}>
+      <span style="color:var(--text-2)">${label}</span>
+    </label>`).join('');
+})();
+
+function typesToTags(types) {
+  return [...(types||'')].map(c => {
+    const label = ELINE_TYPES[c] || c;
+    return `<span class="badge badge-green">${label}</span>`;
+  }).join(' ') || '<span class="text-muted">—</span>';
+}
+
+function typesToString(types) {
+  return [...(types||'')].map(c => ELINE_TYPES[c]||c).join(', ') || '—';
+}
+
+// ── Load ─────────────────────────────────────────────────────────────────
+async function loadElines() {
+  try {
+    const entries = await Panel.apiGet('/api/elines');
+    document.getElementById('elineCount').textContent =
+      entries.length + ' exception' + (entries.length === 1 ? '' : 's');
+
+    if (!entries.length) { Panel.renderTable('elineTbody', [], 'No ban exceptions'); return; }
+
+    Panel.renderTable('elineTbody', entries.map(e => {
+      const mask    = e.name || '?';
+      const types   = e.exception_types || '';
+      const reason  = e.reason || '—';
+      const setBy   = e.set_by || '—';
+      const setAt   = e.set_at  ? Panel.fmtDate(e.set_at)  : '—';
+      const expires = e.expire_at ? Panel.fmtDate(e.expire_at) : 'permanent';
+      const setAtTs  = e.set_at   ? new Date(e.set_at).getTime()   : 0;
+      const expireTs = e.expire_at ? new Date(e.expire_at).getTime() : 9999999999999;
+      const isSoft   = mask.startsWith('%');
+
+      return `<tr data-search="${Panel.esc(mask)} ${Panel.esc(typesToString(types))} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
+                  data-sort0="${Panel.esc(mask.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${expireTs}">
+        <td class="td-mono td-main">
+          ${Panel.esc(mask)}
+          ${isSoft ? '<span class="badge badge-muted" style="font-size:9px" title="Soft: identified users only">soft</span>' : ''}
+        </td>
+        <td style="white-space:normal;line-height:1.9">${typesToTags(types)}</td>
+        <td class="text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setBy)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
+        <td class="td-mono text-muted">${Panel.esc(expires)}</td>
+        <td>
+          ${CAN_DEL ? `<button class="btn btn-danger btn-sm" onclick="deleteEline('${Panel.esc(mask).replace(/'/g,"\\'")}')">remove</button>` : ''}
+        </td>
+      </tr>`;
+    }));
+
+    Panel.initTableSearch('elineSearch', 'elineTbody');
+    Panel.initSortableTable('elineTbody');
+
+  } catch(e) { Panel.tableErrorState('elineTbody', e.message); }
+}
+
+// ── Delete ────────────────────────────────────────────────────────────────
+async function deleteEline(mask) {
+  Panel.confirm('Remove Exception', `Remove E-Line for "${mask}"?`, async () => {
+    try {
+      await Panel.apiDelete('/api/elines/' + encodeURIComponent(mask));
+      Panel.toast('Exception removed', 'ok');
+      loadElines();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+// ── Add ───────────────────────────────────────────────────────────────────
+document.getElementById('elineAddBtn').addEventListener('click', async () => {
+  const mask     = document.getElementById('elineMask').value.trim();
+  const duration = document.getElementById('elineDuration').value.trim() || null;
+  const reason   = document.getElementById('elineReason').value.trim();
+
+  const types = [...document.querySelectorAll('#elineTypes input:checked')]
+    .map(cb => cb.value).join('');
+
+  if (!mask)   { Panel.toast('Enter a mask', 'error'); return; }
+  if (!types)  { Panel.toast('Select at least one exception type', 'error'); return; }
+  if (!reason) { Panel.toast('Enter a reason', 'error'); return; }
+
+  try {
+    await Panel.apiPost('/api/elines', {
+      name:            mask,
+      exception_types: types,
+      reason:          reason,
+      duration:        duration,
+    });
+    Panel.toast('Exception added', 'ok');
+    Panel.closeModal('addElineModal');
+    document.getElementById('elineMask').value = '';
+    document.getElementById('elineReason').value = '';
+    document.getElementById('elineDuration').value = '';
+    // Reset checkboxes to defaults
+    document.querySelectorAll('#elineTypes input').forEach(cb => {
+      cb.checked = DEFAULT_TYPES.includes(cb.value);
+    });
+    loadElines();
+  } catch(e) { Panel.toast(e.message, 'error'); }
+});
+
+loadElines();
+</script>
+{% endblock %}

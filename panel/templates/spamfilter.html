@@ -1,0 +1,412 @@
+{% extends "base.html" %}
+{% block title %}Spamfilter — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Spamfilter{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Spamfilter</div>
+    <div class="page-subtitle" id="sfCount">—</div>
+  </div>
+  <div class="flex gap-8">
+    <button class="btn btn-ghost btn-sm" onclick="loadSf()">↻ Refresh</button>
+    {% if can('ban_add') %}
+    <button class="btn btn-primary btn-sm" onclick="Panel.openModal('addSfModal')">+ Add Entry</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Active Entries</span>
+    <input class="search-input" id="sfSearch" type="search" placeholder="Filter…">
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort-col="0">Pattern</th>
+          <th>Match</th>
+          <th>Targets</th>
+          <th>Action</th>
+          <th>Reason</th>
+          <th>Set by</th>
+          <th data-sort-col="1">Set</th>
+          <th data-sort-col="2">Hits</th>
+          <th data-sort-col="3">Last Hit</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="sfTbody">
+        <tr><td colspan="10" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add spamfilter modal -->
+<div class="modal-backdrop" id="addSfModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title">Add Spamfilter Entry</span>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="form-group">
+        <label class="form-label">Pattern</label>
+        <input class="form-input" id="sfPattern" type="text" placeholder="bad word or regex">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Match Type</label>
+        <select class="form-select" id="sfMatchType">
+          <option value="simple">Simple (plain text, case-insensitive)</option>
+          <option value="regex">Regex (PCRE)</option>
+          <option value="extended">Extended</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Targets <span style="color:var(--text-3);font-weight:400">(what to scan)</span></label>
+        <div id="sfTargets" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Action</label>
+        <select class="form-select" id="sfAction">
+          <option value="block">Block (silently drop)</option>
+          <option value="warn">Warn (send notice to user)</option>
+          <option value="gline">G-Line</option>
+          <option value="zline">Z-Line</option>
+          <option value="kill">Kill</option>
+          <option value="tempshun">Tempshun</option>
+          <option value="shun">Shun</option>
+          <option value="dccblock">DCC Block</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="sfDurationGroup">
+        <label class="form-label">Ban Duration <span style="color:var(--text-3);font-weight:400">(for G-Line/Z-Line/Shun)</span></label>
+        <input class="form-input" id="sfDuration" type="text" value="0" placeholder="1d / 2w / 0 (permanent)">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Reason</label>
+        <input class="form-input" id="sfReason" type="text" placeholder="Reason shown to user / in logs">
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal-close>Cancel</button>
+      <button class="btn btn-primary" id="sfAddBtn">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- View/delete detail drawer -->
+<div class="drawer-backdrop" id="sfDrawerBackdrop"></div>
+<div class="drawer" id="sfDrawer">
+  <div class="drawer-header">
+    <span class="drawer-title" id="sfDrawerTitle">Spamfilter</span>
+    <button class="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="section-title">Pattern</div>
+    <div id="sfDrawerPattern" class="td-mono" style="word-break:break-all;color:var(--text);font-size:13px;padding:4px 0 12px"></div>
+
+    <div class="detail-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="detail-card">
+        <div class="detail-card-title">Match</div>
+        <div id="sfDrawerMatch" class="td-mono" style="color:var(--text-2);font-size:13px"></div>
+      </div>
+      <div class="detail-card">
+        <div class="detail-card-title">Action</div>
+        <div id="sfDrawerAction" style="font-size:13px"></div>
+      </div>
+    </div>
+
+    <div class="section-title">Targets</div>
+    <div id="sfDrawerTargets" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:16px"></div>
+
+    <div class="detail-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="detail-card">
+        <div class="detail-card-title">Set by</div>
+        <div id="sfDrawerSetBy" class="td-mono" style="color:var(--text-2);font-size:13px"></div>
+      </div>
+      <div class="detail-card">
+        <div class="detail-card-title">Set at</div>
+        <div id="sfDrawerSetAt" class="td-mono" style="color:var(--text-2);font-size:13px"></div>
+      </div>
+      <div class="detail-card">
+        <div class="detail-card-title">Hits</div>
+        <div id="sfDrawerHits" class="td-mono" style="color:var(--text-2);font-size:13px"></div>
+      </div>
+      <div class="detail-card">
+        <div class="detail-card-title">Last Hit</div>
+        <div id="sfDrawerLastHit" class="td-mono" style="color:var(--text-2);font-size:13px"></div>
+      </div>
+    </div>
+
+    <div class="section-title">Reason</div>
+    <div id="sfDrawerReason" style="color:var(--text-2);font-size:13px;padding:4px 0 16px"></div>
+
+    {% if can('ban_del') %}
+    <button class="btn btn-danger" onclick="deleteFromDrawer()" style="width:100%">Remove Entry</button>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Target definitions (matches UnrealIRCd) ──────────────────────────────
+const TARGETS = {
+  p: 'usermsg',
+  n: 'usernotice',
+  c: 'chanmsg',
+  N: 'channotice',
+  P: 'part',
+  q: 'quit',
+  d: 'dcc',
+  a: 'away',
+  t: 'topic',
+  T: 'message-tag',
+  u: 'usermask',
+};
+
+const TARGET_LABELS = {
+  p: 'User message (p)',
+  n: 'User notice (n)',
+  c: 'Channel message (c)',
+  N: 'Channel notice (N)',
+  P: 'Part message (P)',
+  q: 'Quit message (q)',
+  d: 'DCC filename (d)',
+  a: 'Away message (a)',
+  t: 'Channel topic (t)',
+  T: 'Message tag (T)',
+  u: 'User mask (u)',
+};
+
+const ACTION_BADGES = {
+  block:    'badge-muted',
+  warn:     'badge-muted',
+  gline:    'badge-red',
+  zline:    'badge-red',
+  kill:     'badge-red',
+  tempshun: 'badge-amber',
+  shun:     'badge-amber',
+  dccblock: 'badge-amber',
+};
+
+// Actions that have a duration
+const DURATION_ACTIONS = new Set(['gline','zline','tempshun','shun']);
+
+const CAN_DEL = {{ 'true' if can('ban_del') else 'false' }};
+
+let sfMap = {};   // key -> entry, for drawer lookup
+let drawerKey = null;
+
+// ── Target checkboxes for add modal ─────────────────────────────────────
+(function buildTargetCheckboxes() {
+  const wrap = document.getElementById('sfTargets');
+  wrap.innerHTML = Object.entries(TARGET_LABELS).map(([char, label]) => `
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;
+                  background:var(--bg-2);border:1px solid var(--border);border-radius:4px;
+                  padding:5px 10px;white-space:nowrap">
+      <input type="checkbox" value="${char}" style="accent-color:var(--accent)" ${char === 'p' ? 'checked' : ''}>
+      <span style="color:var(--text-2)">${label}</span>
+    </label>`).join('');
+})();
+
+document.getElementById('sfAction').addEventListener('change', function() {
+  document.getElementById('sfDurationGroup').style.display =
+    DURATION_ACTIONS.has(this.value) ? '' : 'none';
+});
+// trigger once to set initial state
+document.getElementById('sfDurationGroup').style.display = 'none';
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+function targetsToString(chars) {
+  return [...(chars || '')].map(c => TARGETS[c] || c).join(', ') || '—';
+}
+
+function targetsToTags(chars) {
+  return [...(chars || '')].map(c =>
+    `<span class="badge badge-muted" title="${TARGET_LABELS[c]||c}">${TARGETS[c]||c}</span>`
+  ).join(' ') || '<span class="text-muted">—</span>';
+}
+
+function sfKey(sf) {
+  return (sf.name||'') + '|' + (sf.match_type||'') + '|' + (sf.spamfilter_targets||'') + '|' + (sf.ban_action||'');
+}
+
+// ── Load ─────────────────────────────────────────────────────────────────
+async function loadSf() {
+  try {
+    const entries = await Panel.apiGet('/api/spamfilter');
+    document.getElementById('sfCount').textContent = entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies');
+
+    sfMap = {};
+    entries.forEach(sf => { sfMap[sfKey(sf)] = sf; });
+
+    if (!entries.length) { Panel.renderTable('sfTbody', [], 'No spamfilter entries'); return; }
+
+    Panel.renderTable('sfTbody', entries.map(sf => {
+      const key      = sfKey(sf);
+      const pattern  = sf.name || '?';
+      const match    = sf.match_type || '—';
+      const targets  = targetsToString(sf.spamfilter_targets);
+      const action   = sf.ban_action || '—';
+      const reason   = sf.reason || '—';
+      const setBy    = sf.set_by || '—';
+      const setAt    = sf.set_at ? Panel.fmtDate(sf.set_at) : '—';
+      const setAtTs  = sf.set_at ? new Date(sf.set_at).getTime() : 0;
+      const hits      = sf.hits ?? '—';
+      const lastHit   = sf.last_hit ? Panel.fmtDate(sf.last_hit) : '—';
+      const hitsTs    = typeof sf.hits === 'number' ? sf.hits : -1;
+      const lastHitTs = sf.last_hit ? new Date(sf.last_hit).getTime() : 0;
+      const badge    = ACTION_BADGES[action.toLowerCase()] || 'badge-muted';
+
+      return `<tr data-search="${Panel.esc(pattern)} ${Panel.esc(targets)} ${Panel.esc(action)} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
+                  data-sort0="${Panel.esc(pattern.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${hitsTs}" data-sort3="${lastHitTs}"
+                  style="cursor:pointer" onclick="openDrawer('${Panel.esc(key).replace(/'/g,"\\'")}')">
+        <td class="td-main td-mono" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            title="${Panel.esc(pattern)}">${Panel.esc(pattern)}</td>
+        <td class="td-mono text-muted">${Panel.esc(match)}</td>
+        <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+            class="text-muted" title="${Panel.esc(targets)}">${Panel.esc(targets)}</td>
+        <td><span class="badge ${badge}">${Panel.esc(action)}</span></td>
+        <td class="text-muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setBy)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
+        <td class="td-mono text-muted">${hits}</td>
+        <td class="td-mono text-muted">${Panel.esc(lastHit)}</td>
+        <td onclick="event.stopPropagation()">
+          ${CAN_DEL ? `<button class="btn btn-danger btn-sm" onclick="deleteSf('${Panel.esc(key).replace(/'/g,"\\'")}')">remove</button>` : ''}
+        </td>
+      </tr>`;
+    }));
+
+    Panel.initTableSearch('sfSearch', 'sfTbody');
+    Panel.initSortableTable('sfTbody');
+
+  } catch(e) { Panel.tableErrorState('sfTbody', e.message); }
+}
+
+// ── Drawer ────────────────────────────────────────────────────────────────
+function openDrawer(key) {
+  const sf = sfMap[key];
+  if (!sf) return;
+  drawerKey = key;
+
+  document.getElementById('sfDrawerTitle').textContent = sf.name || 'Spamfilter';
+  document.getElementById('sfDrawerPattern').textContent = sf.name || '—';
+  document.getElementById('sfDrawerMatch').textContent = sf.match_type || '—';
+
+  const actionBadge = ACTION_BADGES[sf.ban_action?.toLowerCase()] || 'badge-muted';
+  const duration = sf.ban_duration && sf.ban_duration !== '0'
+    ? ` <span class="text-muted td-mono" style="font-size:11px">(${sf.ban_duration})</span>` : '';
+  document.getElementById('sfDrawerAction').innerHTML =
+    `<span class="badge ${actionBadge}">${Panel.esc(sf.ban_action||'—')}</span>${duration}`;
+
+  document.getElementById('sfDrawerTargets').innerHTML = targetsToTags(sf.spamfilter_targets);
+  document.getElementById('sfDrawerSetBy').textContent = sf.set_by || '—';
+  document.getElementById('sfDrawerSetAt').textContent = sf.set_at ? Panel.fmtDate(sf.set_at) : '—';
+  document.getElementById('sfDrawerHits').textContent = sf.hits ?? '—';
+  document.getElementById('sfDrawerLastHit').textContent = sf.last_hit ? Panel.fmtDate(sf.last_hit) : '—';
+  document.getElementById('sfDrawerReason').textContent = sf.reason || '—';
+
+  Panel.openDrawer('sfDrawer');
+}
+
+async function deleteFromDrawer() {
+  if (!drawerKey) return;
+  const sf = sfMap[drawerKey];
+  if (!sf) return;
+  Panel.confirm('Remove Spamfilter', `Remove entry "${sf.name}"?`, async () => {
+    try {
+      await deleteSfEntry(sf);
+      Panel.closeDrawer('sfDrawer');
+      loadSf();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+async function deleteSf(key) {
+  const sf = sfMap[key];
+  if (!sf) return;
+  Panel.confirm('Remove Spamfilter', `Remove entry "${sf.name}"?`, async () => {
+    try {
+      await deleteSfEntry(sf);
+      loadSf();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+async function deleteSfEntry(sf) {
+  const res = await fetch('/api/spamfilter', {
+    method: 'DELETE', credentials: 'same-origin',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      name:                sf.name,
+      match_type:          sf.match_type,
+      spamfilter_targets:  sf.spamfilter_targets,
+      ban_action:          sf.ban_action,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed');
+  Panel.toast('Spamfilter entry removed', 'ok');
+}
+
+// ── Add ───────────────────────────────────────────────────────────────────
+document.getElementById('sfAddBtn').addEventListener('click', async () => {
+  const pattern  = document.getElementById('sfPattern').value.trim();
+  const match    = document.getElementById('sfMatchType').value;
+  const action   = document.getElementById('sfAction').value;
+  const duration = DURATION_ACTIONS.has(action)
+    ? (document.getElementById('sfDuration').value.trim() || '0') : '0';
+  const reason   = document.getElementById('sfReason').value.trim();
+
+  const checkedTargets = [...document.querySelectorAll('#sfTargets input:checked')]
+    .map(cb => cb.value).join('');
+
+  if (!pattern)          { Panel.toast('Enter a pattern', 'error'); return; }
+  if (!checkedTargets)   { Panel.toast('Select at least one target', 'error'); return; }
+  if (!reason)           { Panel.toast('Enter a reason', 'error'); return; }
+
+  try {
+    await Panel.apiPost('/api/spamfilter', {
+      name:               pattern,
+      match_type:         match,
+      spamfilter_targets: checkedTargets,
+      ban_action:         action,
+      ban_duration:       duration,
+      reason:             reason,
+    });
+    Panel.toast('Spamfilter entry added', 'ok');
+    Panel.closeModal('addSfModal');
+    // Reset form
+    document.getElementById('sfPattern').value = '';
+    document.getElementById('sfReason').value = '';
+    document.getElementById('sfDuration').value = '0';
+    document.getElementById('sfMatchType').value = 'simple';
+    document.getElementById('sfAction').value = 'block';
+    document.getElementById('sfDurationGroup').style.display = 'none';
+    document.querySelectorAll('#sfTargets input').forEach(cb => cb.checked = cb.value === 'p');
+    loadSf();
+  } catch(e) { Panel.toast(e.message, 'error'); }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  Panel.initTabs();
+  loadSf();
+});
+</script>
+{% endblock %}

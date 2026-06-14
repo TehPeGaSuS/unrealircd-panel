@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}Channels — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Channels{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Channels</div>
+    <div class="page-subtitle" id="chanCount">—</div>
+  </div>
+  <button class="btn btn-ghost btn-sm" onclick="loadChans()">↻ Refresh</button>
+</div>
+
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Active Channels</span>
+    <input class="search-input" id="chanSearch" type="search" placeholder="Filter…">
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr><th>Channel</th><th>Users</th><th>Modes</th><th>Topic</th><th></th></tr>
+      </thead>
+      <tbody id="chansTbody">
+        <tr><td colspan="5" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Channel detail drawer -->
+<div class="drawer-backdrop" id="chanDrawerBackdrop"></div>
+<div class="drawer" id="chanDrawer">
+  <div class="drawer-header">
+    <span class="drawer-title" id="drawerChanName">—</span>
+    <button class="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="tabs" data-tabs="chanTabs">
+      <button class="tab-btn active" data-tab="chanTabInfo">Info</button>
+      <button class="tab-btn" data-tab="chanTabMembers">Members</button>
+      <button class="tab-btn" data-tab="chanTabBans">Bans</button>
+      <button class="tab-btn" data-tab="chanTabActions">Actions</button>
+    </div>
+
+    <!-- Info tab -->
+    <div id="chanTabInfo" class="tab-panel active">
+      <div class="detail-grid" id="chanDetailGrid">
+        <span class="detail-key">loading</span><span class="detail-val">…</span>
+      </div>
+      <div class="section-title">Topic</div>
+      <div id="drawerTopic" class="td-mono text-muted" style="font-size:12px;word-break:break-word">—</div>
+      <div id="drawerTopicMeta" style="font-size:11px;color:var(--text-3);margin-top:4px"></div>
+    </div>
+
+    <!-- Members tab -->
+    <div id="chanTabMembers" class="tab-panel">
+      <div id="drawerMembers" style="font-size:12px;line-height:2">
+        <span class="text-muted">—</span>
+      </div>
+    </div>
+
+    <!-- Bans tab -->
+    <div id="chanTabBans" class="tab-panel">
+      <div class="section-title">Bans (+b)</div>
+      <div id="drawerBans" class="td-mono text-muted" style="font-size:12px;line-height:1.9">—</div>
+      <div class="section-title">Exceptions (+e)</div>
+      <div id="drawerExcepts" class="td-mono text-muted" style="font-size:12px;line-height:1.9">—</div>
+      <div class="section-title">Invite Exc. (+I)</div>
+      <div id="drawerInvex" class="td-mono text-muted" style="font-size:12px;line-height:1.9">—</div>
+    </div>
+
+    <!-- Actions tab -->
+    <div id="chanTabActions" class="tab-panel">
+      <div class="section-title">Topic</div>
+      <div class="form-group">
+        <div class="flex gap-8">
+          <input class="form-input" id="actionTopic" type="text" placeholder="New topic…">
+          <button class="btn btn-ghost btn-sm" onclick="doSetTopic()">Set</button>
+        </div>
+      </div>
+      <div class="section-title">Mode</div>
+      <div class="form-group">
+        <div class="flex gap-8">
+          <input class="form-input" id="actionChanMode" type="text" placeholder="+m or -t" style="width:90px">
+          <input class="form-input" id="actionChanModeParams" type="text" placeholder="params (if any)">
+          <button class="btn btn-ghost btn-sm" onclick="doSetChanMode()">Set</button>
+        </div>
+      </div>
+      <div class="section-title">Kick User</div>
+      <div class="form-group">
+        <div class="flex gap-8">
+          <input class="form-input" id="actionKickNick" type="text" placeholder="nick">
+          <input class="form-input" id="actionKickReason" type="text" placeholder="reason" value="No reason">
+          <button class="btn btn-danger btn-sm" onclick="doKick()">Kick</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let activeChan = null;
+
+async function loadChans() {
+  try {
+    const chans = await Panel.apiGet('/api/channels');
+    document.getElementById('chanCount').textContent = chans.length + ' channels';
+    const sorted = [...chans].sort((a,b) => (b.num_users||0) - (a.num_users||0));
+    if (!sorted.length) { Panel.renderTable('chansTbody', [], 'No channels'); return; }
+    Panel.renderTable('chansTbody', sorted.map(c => {
+      const modes = c.modes || '';
+      const topic = c.topic?.value || c.topic || '';
+      const topicClean = Panel.stripIrc(topic);
+      const safeN = Panel.esc(c.name);
+      const safeT = Panel.esc(topicClean).replace(/'/g, "\\'");
+      return '<tr data-search="' + safeN + ' ' + Panel.esc(topicClean) + '" style="cursor:pointer" onclick="openChanDrawer(\'' + safeN + '\')">'
+        + '<td class="td-main td-mono">' + safeN + '</td>'
+        + '<td class="td-mono">' + (c.num_users ?? 0) + '</td>'
+        + '<td class="td-mono text-muted">' + (Panel.esc(modes) || '—') + '</td>'
+        + '<td class="text-muted truncate" style="max-width:220px">' + (Panel.esc(topicClean) || '—') + '</td>'
+        + '<td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" onclick="openChanDrawer(\'' + safeN + '\')">details</button></td>'
+        + '</tr>';
+    }));
+    Panel.initTableSearch('chanSearch', 'chansTbody');
+  } catch(e) { Panel.tableErrorState('chansTbody', e.message); }
+}
+
+const LEVELS = { q:'Owner', a:'Admin', o:'Op', h:'Half-Op', v:'Voice', Y:'OJOIN' };
+
+async function openChanDrawer(chan) {
+  activeChan = chan;
+  document.getElementById('drawerChanName').textContent = chan;
+  document.getElementById('chanDetailGrid').innerHTML = '<span class="detail-key">loading</span><span class="detail-val">…</span>';
+  document.getElementById('drawerMembers').innerHTML = '<span class="text-muted">loading…</span>';
+  document.getElementById('drawerBans').textContent = '—';
+  document.getElementById('drawerExcepts').textContent = '—';
+  document.getElementById('drawerInvex').textContent = '—';
+  document.getElementById('drawerTopic').textContent = '—';
+  document.getElementById('drawerTopicMeta').textContent = '';
+  document.getElementById('actionTopic').value = '';
+  document.getElementById('actionChanMode').value = '';
+  document.getElementById('actionChanModeParams').value = '';
+  document.getElementById('actionKickNick').value = '';
+  document.getElementById('actionKickReason').value = 'No reason';
+
+  document.querySelectorAll('#chanDrawer .tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#chanDrawer .tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('#chanDrawer [data-tab="chanTabInfo"]').classList.add('active');
+  document.getElementById('chanTabInfo').classList.add('active');
+
+  Panel.openDrawer('chanDrawer');
+
+  try {
+    const name = chan.startsWith('#') ? chan.slice(1) : chan;
+    const c = await Panel.apiGet('/api/channels/' + encodeURIComponent(name) + '/detail');
+
+    const topic = c.topic?.value || c.topic || '';
+    document.getElementById('drawerTopic').textContent = Panel.stripIrc(topic) || '(no topic)';
+    const topicBy = c.topic?.set_by || '';
+    const topicAt = c.topic?.set_at ? Panel.fmtDate(c.topic.set_at) : '';
+    document.getElementById('drawerTopicMeta').textContent =
+      topicBy ? 'Set by ' + topicBy + (topicAt ? ' on ' + topicAt : '') : '';
+    document.getElementById('actionTopic').value = topic;
+
+    const rows = [
+      ['Name',    c.name || '—'],
+      ['Users',   c.num_users ?? '—'],
+      ['Modes',   c.modes || '—'],
+      ['Created', c.creation_time ? Panel.fmtDate(c.creation_time) : '—'],
+    ];
+    document.getElementById('chanDetailGrid').innerHTML = rows
+      .map(r => '<span class="detail-key">' + r[0] + '</span><span class="detail-val td-mono">' + Panel.esc(String(r[1])) + '</span>')
+      .join('');
+
+    // Members
+    const members = c.members || [];
+    if (members.length) {
+      document.getElementById('drawerMembers').innerHTML = members.map(m => {
+        const nick = m.name || m.nick || '?';
+        const rawLevel = m.level || [];
+        const levelArr = Array.isArray(rawLevel) ? rawLevel : [rawLevel];
+        const levels = levelArr.map(l => LEVELS[l]||l)
+          .map(l => '<span class="badge badge-accent" style="font-size:9px">' + Panel.esc(l) + '</span>').join(' ');
+        return '<div style="display:flex;align-items:center;gap:6px;padding:2px 0">'
+          + '<span class="td-mono" style="color:var(--text)">' + Panel.esc(nick) + '</span>'
+          + (levels ? ' ' + levels : '')
+          + '</div>';
+      }).join('');
+    } else {
+      document.getElementById('drawerMembers').innerHTML = '<span class="text-muted">No members</span>';
+    }
+
+    // Bans / exceptions / invex
+    function banList(list) {
+      if (!list || !list.length) return '—';
+      return list.map(b => Panel.esc(b.name||'?') + (b.set_by ? ' <span style="color:var(--text-3)">(' + Panel.esc(b.set_by) + ')</span>' : '')).join('<br>');
+    }
+    document.getElementById('drawerBans').innerHTML   = banList(c.bans);
+    document.getElementById('drawerExcepts').innerHTML = banList(c.ban_exemptions);
+    document.getElementById('drawerInvex').innerHTML   = banList(c.invite_exceptions);
+
+  } catch(e) {
+    document.getElementById('chanDetailGrid').innerHTML =
+      '<span class="detail-key">error</span><span class="detail-val" style="color:var(--red)">' + Panel.esc(e.message) + '</span>';
+  }
+}
+
+async function doSetTopic() {
+  if (!activeChan) return;
+  const topic = document.getElementById('actionTopic').value;
+  const name = activeChan.startsWith('#') ? activeChan.slice(1) : activeChan;
+  try {
+    await Panel.apiPost('/api/channels/' + encodeURIComponent(name) + '/topic', { topic });
+    Panel.toast('Topic set', 'ok');
+    document.getElementById('drawerTopic').textContent = Panel.stripIrc(topic) || '(no topic)';
+    loadChans();
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+async function doSetChanMode() {
+  if (!activeChan) return;
+  const modes  = document.getElementById('actionChanMode').value.trim();
+  const params = document.getElementById('actionChanModeParams').value.trim();
+  if (!modes) { Panel.toast('Enter modes', 'error'); return; }
+  const name = activeChan.startsWith('#') ? activeChan.slice(1) : activeChan;
+  try {
+    await Panel.apiPost('/api/channels/' + encodeURIComponent(name) + '/mode', { modes, parameters: params });
+    Panel.toast('Mode set', 'ok');
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+async function doKick() {
+  if (!activeChan) return;
+  const nick   = document.getElementById('actionKickNick').value.trim();
+  const reason = document.getElementById('actionKickReason').value || 'No reason';
+  if (!nick) { Panel.toast('Enter a nick', 'error'); return; }
+  const name = activeChan.startsWith('#') ? activeChan.slice(1) : activeChan;
+  try {
+    await Panel.apiPost('/api/channels/' + encodeURIComponent(name) + '/kick', { nick, reason });
+    Panel.toast('Kicked ' + nick, 'ok');
+    document.getElementById('actionKickNick').value = '';
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  Panel.initTabs();
+  loadChans();
+});
+</script>
+{% endblock %}

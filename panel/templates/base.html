@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>{% block title %}{{ network_name }} Panel{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/panel.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<!-- Mobile overlay -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <span class="sidebar-logo">
+      <span class="logo-bracket">[</span>{{ network_name }}<span class="logo-bracket">]</span>
+    </span>
+    <button class="sidebar-close" id="sidebarClose" aria-label="Close menu">✕</button>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a href="{{ url_for('dashboard') }}" class="nav-item {% if page == 'dashboard' %}active{% endif %}">
+      <span class="nav-icon">◈</span>
+      <span class="nav-label">Overview</span>
+    </a>
+    {% if can('view_users') %}
+    <a href="{{ url_for('users') }}" class="nav-item {% if page == 'users' %}active{% endif %}">
+      <span class="nav-icon">◉</span>
+      <span class="nav-label">Users</span>
+    </a>
+    <a href="{{ url_for('usermap') }}" class="nav-item {% if page == 'map' %}active{% endif %}">
+      <span class="nav-icon">⊕</span>
+      <span class="nav-label">User Map</span>
+    </a>
+    {% endif %}
+    {% if can('view_channels') %}
+    <a href="{{ url_for('channels') }}" class="nav-item {% if page == 'channels' %}active{% endif %}">
+      <span class="nav-icon">◎</span>
+      <span class="nav-label">Channels</span>
+    </a>
+    {% endif %}
+    {% if can('view_servers') %}
+    <a href="{{ url_for('servers') }}" class="nav-item {% if page == 'servers' %}active{% endif %}">
+      <span class="nav-icon">◆</span>
+      <span class="nav-label">Servers</span>
+    </a>
+    {% endif %}
+    {% if can('view_bans') %}
+    <a href="{{ url_for('bans') }}" class="nav-item {% if page == 'bans' %}active{% endif %}">
+      <span class="nav-icon">◈</span>
+      <span class="nav-label">Bans</span>
+    </a>
+    <a href="{{ url_for('spamfilter') }}" class="nav-item {% if page == 'spamfilter' %}active{% endif %}">
+      <span class="nav-icon">⊗</span>
+      <span class="nav-label">Spamfilter</span>
+    </a>
+    <a href="{{ url_for('elines') }}" class="nav-item {% if page == 'elines' %}active{% endif %}">
+      <span class="nav-icon">◌</span>
+      <span class="nav-label">Exceptions</span>
+    </a>
+    {% endif %}
+    {% if can('view_logs') %}
+    <a href="{{ url_for('logs_page') }}" class="nav-item {% if page == 'logs' %}active{% endif %}">
+      <span class="nav-icon">▤</span>
+      <span class="nav-label">Logs</span>
+    </a>
+    {% endif %}
+    <a href="{{ url_for('settings') }}" class="nav-item {% if page == 'settings' %}active{% endif %}">
+      <span class="nav-icon">⚙</span>
+      <span class="nav-label">Settings</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="sidebar-user">
+      <span class="user-dot"></span>
+      <span class="user-name">{{ current_user }}</span>
+    </div>
+    <div class="sidebar-actions">
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme" title="Toggle light/dark">
+        <span class="theme-icon-light">☀</span>
+        <span class="theme-icon-dark">☾</span>
+      </button>
+      <a href="{{ url_for('logout') }}" class="btn-logout" title="Logout">⏻</a>
+    </div>
+  </div>
+</aside>
+
+<!-- Main -->
+<div class="main-wrap">
+
+  <!-- Top bar (mobile) -->
+  <header class="topbar">
+    <button class="hamburger" id="hamburger" aria-label="Open menu">
+      <span></span><span></span><span></span>
+    </button>
+    <span class="topbar-title">{% block topbar_title %}{{ network_name }}{% endblock %}</span>
+    <div class="topbar-right">
+      <button class="theme-toggle" id="themeToggleMobile" aria-label="Toggle theme">
+        <span class="theme-icon-light">☀</span>
+        <span class="theme-icon-dark">☾</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+</div>
+
+<script src="{{ url_for('static', filename='js/panel.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

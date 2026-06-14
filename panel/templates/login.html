@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Login — {{ network_name }} Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/panel.css') }}">
+  <script>
+    // Apply theme immediately to avoid flash
+    (function(){
+      var t = localStorage.getItem('unrealircd-theme') || 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body class="login-page">
+
+<button class="theme-toggle login-theme" id="themeToggle" aria-label="Toggle theme">
+  <span class="theme-icon-light">☀</span>
+  <span class="theme-icon-dark">☾</span>
+</button>
+
+<div class="login-wrap">
+  <div class="login-outer">
+    {# Drop a logo at panel/static/logo.png to show it above the login box #}
+    <div class="login-logo-img">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="{{ network_name }}" onerror="this.parentElement.style.display='none'">
+    </div>
+    <div class="login-card">
+      <div class="login-logo">
+        <span class="logo-bracket">[</span>{{ network_name }}<span class="logo-bracket">]</span>
+      </div>
+      <div class="login-sub">admin panel</div>
+
+    {% if error %}
+    <div class="login-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post">
+      <div class="form-group">
+        <label class="form-label" for="username">Username</label>
+        <input class="form-input" type="text" id="username" name="username"
+               autocomplete="username" autofocus required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-input" type="password" id="password" name="password"
+               autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary login-btn">Sign in</button>
+    </form>
+    </div>
+  </div>
+</div>
+
+
+<script src="{{ url_for('static', filename='js/panel.js') }}"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    if (window.Panel && Panel.initPasswordToggles) Panel.initPasswordToggles();
+  });
+</script>
+
+</body>
+</html>

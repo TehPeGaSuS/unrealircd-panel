@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Access Denied — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Access Denied{% endblock %}
+{% block content %}
+<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:60vh;gap:12px;text-align:center">
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:48px;color:var(--border-2)">403</div>
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:16px;color:var(--text-2)">Permission denied</div>
+  <div style="color:var(--text-3);font-size:13px">Your account doesn't have access to this section.</div>
+  <a href="{{ url_for('dashboard') }}" class="btn btn-ghost btn-sm" style="margin-top:8px">← Back to dashboard</a>
+</div>
+{% endblock %}

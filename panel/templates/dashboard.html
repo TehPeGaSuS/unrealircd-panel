@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Overview — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Overview{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Overview</div>
+    <div class="page-subtitle" id="statsUpdated">—</div>
+  </div>
+  <button class="btn btn-ghost btn-sm" onclick="loadStats()">↻ Refresh</button>
+</div>
+
+<!-- Stat cards -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label">Users</div>
+    <div class="stat-value loading" id="stat-users">…</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Channels</div>
+    <div class="stat-value loading" id="stat-channels">…</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Servers</div>
+    <div class="stat-value loading" id="stat-servers">…</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Opers</div>
+    <div class="stat-value loading" id="stat-opers">…</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Bans</div>
+    <div class="stat-value loading" id="stat-bans">…</div>
+  </div>
+</div>
+
+<!-- Recent users -->
+<div class="table-wrap" style="margin-bottom:16px">
+  <div class="table-toolbar">
+    <span class="table-title">Online Users</span>
+    <a href="{{ url_for('users') }}" class="btn btn-ghost btn-sm">View all →</a>
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr>
+          <th>Nick</th>
+          <th>Host</th>
+          <th>Modes</th>
+        </tr>
+      </thead>
+      <tbody id="dashUsersTbody">
+        <tr><td colspan="4" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Recent channels -->
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Active Channels</span>
+    <a href="{{ url_for('channels') }}" class="btn btn-ghost btn-sm">View all →</a>
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr>
+          <th>Channel</th>
+          <th>Users</th>
+          <th>Topic</th>
+        </tr>
+      </thead>
+      <tbody id="dashChansTbody">
+        <tr><td colspan="3" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadStats() {
+  try {
+    const s = await Panel.apiGet('/api/stats');
+    document.getElementById('stat-users').textContent    = s.users    ?? '—';
+    document.getElementById('stat-channels').textContent = s.channels ?? '—';
+    document.getElementById('stat-servers').textContent  = s.servers  ?? '—';
+    document.getElementById('stat-opers').textContent    = s.opers    ?? '—';
+    document.getElementById('stat-bans').textContent     = s.server_bans ?? '—';
+    document.querySelectorAll('.stat-value').forEach(el => el.classList.remove('loading'));
+    document.getElementById('statsUpdated').textContent =
+      'updated ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  } catch(e) {
+    document.querySelectorAll('.stat-value').forEach(el => { el.textContent='err'; el.style.color='var(--red)'; });
+  }
+}
+
+async function loadDashUsers() {
+  try {
+    const users = await Panel.apiGet('/api/users');
+    const top = users.slice(0, 10);
+    if (!top.length) { Panel.renderTable('dashUsersTbody', [], 'No users online'); return; }
+    Panel.renderTable('dashUsersTbody', top.map(u => {
+      const nick = u.name || u.nick || '?';
+      const host = u.ip || u.real_ip || u.hostname || '—';
+      const modes= u.user?.modes || u.modes || '';
+      const isOper = modes.includes('o');
+      return `<tr>
+        <td class="td-main td-mono">${Panel.esc(nick)}${isOper ? ' <span class="badge badge-amber">oper</span>' : ''}</td>
+        <td class="td-mono text-muted">${Panel.esc(host)}</td>
+        <td class="td-mono text-muted">${Panel.esc(modes) || '—'}</td>
+      </tr>`;
+    }));
+  } catch(e) {
+    Panel.tableErrorState('dashUsersTbody', e.message);
+  }
+}
+
+async function loadDashChans() {
+  try {
+    const chans = await Panel.apiGet('/api/channels');
+    const top = [...chans].sort((a,b) => (b.num_users||0)-(a.num_users||0)).slice(0, 8);
+    if (!top.length) { Panel.renderTable('dashChansTbody', [], 'No channels'); return; }
+    Panel.renderTable('dashChansTbody', top.map(c => {
+      const topic = c.topic?.value || c.topic || '';
+      return `<tr>
+        <td class="td-main td-mono">${Panel.esc(c.name)}</td>
+        <td class="td-mono">${c.num_users ?? 0}</td>
+        <td class="text-muted truncate" style="max-width:300px">${Panel.esc(topic) || '<span class="text-muted">—</span>'}</td>
+      </tr>`;
+    }));
+  } catch(e) {
+    Panel.tableErrorState('dashChansTbody', e.message);
+  }
+}
+
+loadStats();
+loadDashUsers();
+loadDashChans();
+setInterval(loadStats, 30000);
+</script>
+{% endblock %}

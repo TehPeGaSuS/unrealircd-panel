@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+{% block title %}Users — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Users{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Users</div>
+    <div class="page-subtitle" id="userCount">—</div>
+  </div>
+  <button class="btn btn-ghost btn-sm" onclick="loadUsers()">↻ Refresh</button>
+</div>
+
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Online</span>
+    <input class="search-input" id="userSearch" type="search" placeholder="Filter…">
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort-col="0">Nick</th>
+          <th>Ident@Host</th>
+          <th>IP</th>
+          <th data-sort-col="3">Country</th>
+          <th data-sort-col="4">Rep</th>
+          <th>Modes</th>
+          <th data-sort-col="6">Connected</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="usersTbody">
+        <tr><td colspan="9" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- User detail drawer -->
+<div class="drawer-backdrop" id="userDrawerBackdrop"></div>
+<div class="drawer" id="userDrawer">
+  <div class="drawer-header">
+    <span class="drawer-title" id="drawerNick">—</span>
+    <button class="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="tabs" data-tabs="userTabs">
+      <button class="tab-btn active" data-tab="tabInfo">Info</button>
+      <button class="tab-btn" data-tab="tabWhowas">WhoWas</button>
+      <button class="tab-btn" data-tab="tabActions">Actions</button>
+    </div>
+
+    <div id="tabInfo" class="tab-panel active">
+      <div class="detail-grid" id="userDetailGrid">
+        <span class="detail-key">loading</span><span class="detail-val">…</span>
+      </div>
+      <div class="section-title">Channels</div>
+      <div id="userChannels" class="text-muted td-mono" style="font-size:12px;line-height:1.8">—</div>
+    </div>
+
+    <div id="tabWhowas" class="tab-panel">
+      <div id="whowasLoading" style="color:var(--text-3);font-family:'IBM Plex Mono',monospace;font-size:12px;padding:12px 0">
+        Click to load history…
+      </div>
+      <div id="whowasList" style="display:none"></div>
+    </div>
+
+    <div id="tabActions" class="tab-panel">
+      <div class="section-title">Identity</div>
+      <div class="form-group">
+        <label class="form-label">Change Nick</label>
+        <div class="flex gap-8">
+          <input class="form-input" id="actionNewnick" type="text" placeholder="new nick">
+          <button class="btn btn-ghost btn-sm" onclick="doSetNick()">Set</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Set VHost</label>
+        <div class="flex gap-8">
+          <input class="form-input" id="actionVhost" type="text" placeholder="user.example.com">
+          <button class="btn btn-ghost btn-sm" onclick="doSetVhost()">Set</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Set Mode</label>
+        <div class="flex gap-8">
+          <input class="form-input" id="actionMode" type="text" placeholder="+x or -o">
+          <button class="btn btn-ghost btn-sm" onclick="doSetMode()">Set</button>
+        </div>
+      </div>
+
+      <div class="section-title">Sanctions</div>
+      <div class="form-group">
+        <label class="form-label">G-Line (global ban on mask)</label>
+        <div class="flex gap-8" style="flex-wrap:wrap;align-items:center">
+          <input class="form-input" id="actionGlineMask" type="text" placeholder="*@host" style="flex:2;min-width:120px">
+          <input class="form-input" id="actionGlineDur" type="text" placeholder="1d" style="width:55px">
+          <input class="form-input" id="actionGlineReason" type="text" placeholder="reason" style="flex:2;min-width:120px">
+          <button class="btn btn-danger btn-sm" onclick="doGline()">G-Line</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Kill from network</label>
+        <div class="flex gap-8">
+          <input class="form-input" id="actionKillReason" type="text" placeholder="reason" value="No reason">
+          <button class="btn btn-danger btn-sm" onclick="doKill()">Kill</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let activeNick = null;
+
+async function loadUsers() {
+  try {
+    const users = await Panel.apiGet('/api/users');
+    document.getElementById('userCount').textContent = users.length + ' online';
+    if (!users.length) { Panel.renderTable('usersTbody', [], 'No users online'); return; }
+    Panel.renderTable('usersTbody', users.map(u => {
+      const nick  = u.name || u.nick || '?';
+      const user  = u.user || {};
+      const ident = user.username || u.username || '?';
+      const host  = u.hostname || '?';
+      const ip    = u.ip || '—';
+      const modes = user.modes || u.modes || '';
+      const since = u.connected_since || u.connectedSince;
+      const cc    = u.geoip?.country_code || '';
+      const rep   = user.reputation ?? '—';
+      const isOper = modes.includes('o');
+      const isSrv  = modes.includes('S');
+      const isLocal = (function(ip) {
+        if (!ip || ip === '—') return false;
+        if (ip === '::1' || ip === 'localhost') return true;
+        if (/^127\./.test(ip)) return true;
+        if (/^10\./.test(ip)) return true;
+        if (/^192\.168\./.test(ip)) return true;
+        if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
+        if (/^fc|^fd/i.test(ip)) return true; // IPv6 ULA
+        return false;
+      })(u.ip);
+      let badge = '';
+      if (isSrv)        badge = '<span class="badge badge-accent">svc</span>';
+      else if (isOper)  badge = '<span class="badge badge-amber">oper</span>';
+      // local indicator is shown in the country column, not as a nick badge
+      const countryHtml = isLocal
+        ? '<span class="badge badge-local" title="Local/private connection">⌂ local</span>'
+        : cc
+          ? '<img src="https://flagcdn.com/20x15/' + cc.toLowerCase() + '.png" width="20" height="15" alt="' + Panel.esc(cc) + '" title="' + Panel.esc(cc) + '" style="vertical-align:middle;border-radius:2px"> ' + Panel.esc(cc)
+          : '<span class="text-muted">—</span>';
+      const repColor = rep === '—' ? '' : rep >= 100 ? 'color:var(--green)' : rep <= 10 ? 'color:var(--red)' : 'color:var(--text-2)';
+      const sinceTs = u.connected_since ? (typeof u.connected_since === 'number' ? u.connected_since : new Date(u.connected_since).getTime()/1000) : 0;
+      return '<tr data-search="' + Panel.esc(nick) + ' ' + Panel.esc(host) + ' ' + Panel.esc(ip) + ' ' + Panel.esc(cc) + '"' + ' data-sort0="' + Panel.esc(nick.toLowerCase()) + '"' + ' data-sort3="' + Panel.esc(cc) + '"' + ' data-sort4="' + (rep === '\u2014' ? -1 : rep) + '"' + ' data-sort6="' + sinceTs + '"' + ' style="cursor:pointer" onclick="openUserDrawer(\'' + Panel.esc(nick) + '\')">'
+        + '<td class="td-main td-mono">' + Panel.esc(nick) + ' ' + badge + '</td>'
+        + '<td class="td-mono text-muted">' + Panel.esc(ident) + '@' + Panel.esc(host) + '</td>'
+        + '<td class="td-mono text-muted">' + Panel.esc(ip) + '</td>'
+        + '<td style="white-space:nowrap">' + countryHtml + '</td>'
+        + '<td class="td-mono" style="' + repColor + '">' + rep + '</td>'
+        + '<td class="td-mono text-muted">' + (Panel.esc(modes) || '—') + '</td>'
+        + '<td class="td-mono text-muted">' + (since ? Panel.fmtTime(since) : '—') + '</td>'
+        + '<td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" onclick="openUserDrawer(\'' + Panel.esc(nick) + '\')">details</button></td>'
+        + '</tr>';
+    }));
+    Panel.initTableSearch('userSearch', 'usersTbody');
+    Panel.initSortableTable('usersTbody');
+  } catch(e) { Panel.tableErrorState('usersTbody', e.message); }
+}
+
+async function openUserDrawer(nick) {
+  activeNick = nick;
+  document.getElementById('drawerNick').textContent = nick;
+  document.getElementById('userDetailGrid').innerHTML = '<span class="detail-key">loading</span><span class="detail-val">…</span>';
+  document.getElementById('userChannels').textContent = '—';
+  document.getElementById('whowasLoading').textContent = 'Click to load history…';
+  document.getElementById('whowasLoading').style.display = '';
+  document.getElementById('whowasList').style.display = 'none';
+  document.getElementById('whowasList').innerHTML = '';
+  document.getElementById('actionNewnick').value = '';
+  document.getElementById('actionVhost').value = '';
+  document.getElementById('actionMode').value = '';
+  document.getElementById('actionKillReason').value = 'No reason';
+  document.getElementById('actionGlineMask').value = '';
+  document.getElementById('actionGlineDur').value = '1d';
+  document.getElementById('actionGlineReason').value = '';
+
+  document.querySelectorAll('#userDrawer .tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#userDrawer .tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('#userDrawer [data-tab="tabInfo"]').classList.add('active');
+  document.getElementById('tabInfo').classList.add('active');
+
+  Panel.openDrawer('userDrawer');
+
+  try {
+    const u = await Panel.apiGet('/api/users/' + encodeURIComponent(nick) + '/detail');
+    const user = u.user || {};
+    const geo = u.geoip || {};
+    const drawerIp = u.ip || '—';
+    const drawerIsLocal = (function(ip) {
+      if (!ip || ip === '—') return false;
+      if (ip === '::1' || ip === 'localhost') return true;
+      if (/^127\./.test(ip)) return true;
+      if (/^10\./.test(ip)) return true;
+      if (/^192\.168\./.test(ip)) return true;
+      if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
+      if (/^fc|^fd/i.test(ip)) return true;
+      return false;
+    })(drawerIp);
+    const rows = [
+      ['Nick',       u.name || '—'],
+      ['Ident',      user.username || '—'],
+      ['Host',       u.hostname || '—'],
+      ['Cloaked',    user.cloakedhost || '—'],
+      ['IP',         drawerIp],
+      ['Country',    drawerIsLocal ? '⌂ local' : (geo.country_code || '—')],
+      ['ASN',        geo.asn ? geo.asn + (geo.asname ? ' (' + geo.asname + ')' : '') : '—'],
+      ['Reputation', user.reputation ?? '—'],
+      ['Realname',   user.realname || '—'],
+      ['Server',     u.server || '—'],
+      ['Account',    user.account || '—'],
+      ['Modes',      user.modes || '—'],
+      ['Snomask',    user.snomask || '—'],
+      ['VHost',      user.vhost || '—'],
+      ['TLS',        u.tls ? (u.tls.cipher || 'yes') : 'no'],
+      ['Connected',  u.connected_since ? Panel.fmtTime(u.connected_since) : '—'],
+      ['Idle',       u.idle ? Panel.fmtDuration(u.idle) : '—'],
+    ];
+    document.getElementById('userDetailGrid').innerHTML = rows
+      .map(function(r){ return '<span class="detail-key">' + r[0] + '</span><span class="detail-val">' + Panel.esc(String(r[1])) + '</span>'; })
+      .join('');
+    const chans = u.channels || [];
+    document.getElementById('userChannels').textContent = chans.length ? chans.join('  ') : '—';
+    const realIp = u.ip || '';
+    if (realIp) document.getElementById('actionGlineMask').value = '*@' + realIp;
+  } catch(e) {
+    document.getElementById('userDetailGrid').innerHTML =
+      '<span class="detail-key">error</span><span class="detail-val" style="color:var(--red)">' + Panel.esc(e.message) + '</span>';
+  }
+}
+
+async function loadWhowas(nick) {
+  const loading = document.getElementById('whowasLoading');
+  const list    = document.getElementById('whowasList');
+  loading.textContent = '⟳ loading…';
+  loading.style.display = '';
+  list.style.display = 'none';
+  try {
+    const entries = await Panel.apiGet('/api/whowas?nick=' + encodeURIComponent(nick));
+    loading.style.display = 'none';
+    list.style.display = '';
+    if (!entries.length) {
+      list.innerHTML = '<div style="color:var(--text-3);font-family:\'IBM Plex Mono\',monospace;font-size:12px;padding:8px 0">No history found.</div>';
+      return;
+    }
+    // Sort newest first
+    const sorted = [...entries].sort((a,b) => new Date(b.logoff_time||0) - new Date(a.logoff_time||0));
+    list.innerHTML = sorted.map(e => {
+      const logon  = e.logon_time  ? Panel.fmtDate(e.logon_time)  + ' ' + Panel.fmtTime(e.logon_time)  : '—';
+      const logoff = e.logoff_time ? Panel.fmtDate(e.logoff_time) + ' ' + Panel.fmtTime(e.logoff_time) : '—';
+      const u = e.user || {};
+      const event_badge = e.event === 'quit'
+        ? '<span class="badge badge-muted">quit</span>'
+        : e.event === 'nick-change'
+          ? '<span class="badge badge-accent">nick change</span>'
+          : '<span class="badge badge-muted">' + Panel.esc(e.event||'?') + '</span>';
+      return `<div style="border:1px solid var(--border);border-radius:4px;padding:10px 12px;margin-bottom:8px;font-size:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span class="td-mono" style="font-weight:500;color:var(--text)">${Panel.esc(e.name||nick)}</span>
+          ${event_badge}
+        </div>
+        <div class="detail-grid" style="grid-template-columns:60px 1fr;gap:3px 8px;font-size:11px">
+          <span style="color:var(--text-3)">host</span><span class="td-mono" style="color:var(--text-2)">${Panel.esc(u.username||'?')}@${Panel.esc(e.hostname||'?')}</span>
+          <span style="color:var(--text-3)">ip</span><span class="td-mono" style="color:var(--text-2)">${Panel.esc(e.ip||'—')}</span>
+          ${u.account ? `<span style="color:var(--text-3)">account</span><span class="td-mono" style="color:var(--text-2)">${Panel.esc(u.account)}</span>` : ''}
+          ${u.servername ? `<span style="color:var(--text-3)">server</span><span class="td-mono" style="color:var(--text-2)">${Panel.esc(u.servername)}</span>` : ''}
+          <span style="color:var(--text-3)">on</span><span class="td-mono" style="color:var(--text-2)">${logon}</span>
+          <span style="color:var(--text-3)">off</span><span class="td-mono" style="color:var(--text-2)">${logoff}</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    loading.textContent = 'Error: ' + e.message;
+  }
+}
+
+// Load whowas lazily when the tab is clicked
+document.addEventListener('DOMContentLoaded', function() {
+  // Intercept tab clicks on the user drawer for whowas lazy load
+  const drawer = document.getElementById('userDrawer');
+  if (drawer) {
+    drawer.addEventListener('click', function(e) {
+      const btn = e.target.closest('[data-tab="tabWhowas"]');
+      if (btn && activeNick) {
+        // Only load if not already loaded for this nick
+        const list = document.getElementById('whowasList');
+        if (!list.dataset.loadedFor || list.dataset.loadedFor !== activeNick) {
+          list.dataset.loadedFor = activeNick;
+          loadWhowas(activeNick);
+        }
+      }
+    });
+  }
+});
+
+async function doSetNick() {
+  if (!activeNick) return;
+  const newnick = document.getElementById('actionNewnick').value.trim();
+  if (!newnick) { Panel.toast('Enter a new nick', 'error'); return; }
+  try {
+    await Panel.apiPost('/api/users/' + encodeURIComponent(activeNick) + '/nick', { newnick });
+    Panel.toast('Nick changed to ' + newnick, 'ok');
+    document.getElementById('drawerNick').textContent = newnick;
+    activeNick = newnick;
+    setTimeout(loadUsers, 600);
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+async function doSetVhost() {
+  if (!activeNick) return;
+  const vhost = document.getElementById('actionVhost').value.trim();
+  if (!vhost) { Panel.toast('Enter a vhost', 'error'); return; }
+  try {
+    await Panel.apiPost('/api/users/' + encodeURIComponent(activeNick) + '/vhost', { vhost });
+    Panel.toast('VHost set', 'ok');
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+async function doSetMode() {
+  if (!activeNick) return;
+  const modes = document.getElementById('actionMode').value.trim();
+  if (!modes) { Panel.toast('Enter modes', 'error'); return; }
+  try {
+    await Panel.apiPost('/api/users/' + encodeURIComponent(activeNick) + '/mode', { modes });
+    Panel.toast('Mode set', 'ok');
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+async function doGline() {
+  if (!activeNick) return;
+  const name   = document.getElementById('actionGlineMask').value.trim();
+  const dur    = document.getElementById('actionGlineDur').value.trim() || '1d';
+  const reason = document.getElementById('actionGlineReason').value.trim();
+  if (!name || !reason) { Panel.toast('Fill in mask and reason', 'error'); return; }
+  try {
+    await Panel.apiPost('/api/bans', { name, type: 'gline', duration: dur, reason });
+    Panel.toast('G-Line set on ' + name, 'ok');
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+async function doKill() {
+  if (!activeNick) return;
+  const reason = document.getElementById('actionKillReason').value || 'No reason';
+  Panel.confirm('Kill User', 'Kill ' + activeNick + '?', async function() {
+    try {
+      await Panel.apiPost('/api/users/' + encodeURIComponent(activeNick) + '/kill', { reason });
+      Panel.toast('Killed ' + activeNick, 'ok');
+      Panel.closeDrawer('userDrawer');
+      setTimeout(loadUsers, 800);
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  Panel.initTabs();
+  loadUsers();
+});
+</script>
+{% endblock %}

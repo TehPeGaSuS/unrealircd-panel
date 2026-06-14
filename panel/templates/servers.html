@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Servers — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Servers{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Servers</div>
+    <div class="page-subtitle" id="srvCount">—</div>
+  </div>
+  <button class="btn btn-ghost btn-sm" onclick="loadServers()">↻ Refresh</button>
+</div>
+
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Network Servers</span>
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr><th data-sort-col="0">Server</th><th data-sort-col="1">Users</th><th>Version</th><th>Uplink</th><th></th></tr>
+      </thead>
+      <tbody id="srvTbody">
+        <tr><td colspan="5" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadServers() {
+  try {
+    const srvs = await Panel.apiGet('/api/servers');
+    document.getElementById('srvCount').textContent = srvs.length + ' server' + (srvs.length !== 1 ? 's' : '');
+    if (!srvs.length) { Panel.renderTable('srvTbody', [], 'No servers'); return; }
+    Panel.renderTable('srvTbody', srvs.map(s => {
+      const name    = s.name || '?';
+      // UnrealIRCd returns user count nested under server.users_online or at top level
+      const users   = s.server?.num_users ?? '—';
+      // version lives at server.features.software (e.g. "UnrealIRCd-6.1.2")
+      const rawVer  = s.server?.features?.software || '';
+      const version = rawVer ? rawVer.replace(/^UnrealIRCd-/i, '') : '—';
+      const uplink  = s.server?.uplink || '—';
+      return '<tr data-search="' + Panel.esc(name) + '" data-sort0="' + Panel.esc(name.toLowerCase()) + '" data-sort1="' + (isNaN(users) ? -1 : users) + '">'
+        + '<td class="td-main td-mono">' + Panel.esc(name) + '</td>'
+        + '<td class="td-mono">' + users + '</td>'
+        + '<td class="td-mono text-muted">' + Panel.esc(version) + '</td>'
+        + '<td class="td-mono text-muted">' + Panel.esc(uplink) + '</td>'
+        + '<td><button class="btn btn-ghost btn-sm" onclick="doRehash(\'' + Panel.esc(name) + '\')">rehash</button></td>'
+        + '</tr>';
+    }));
+    Panel.initSortableTable('srvTbody');
+  } catch(e) { Panel.tableErrorState('srvTbody', e.message); }
+}
+
+function doRehash(name) {
+  Panel.confirm('Rehash Server', 'Rehash ' + name + '?', async function() {
+    try {
+      await Panel.apiPost('/api/servers/' + encodeURIComponent(name) + '/rehash');
+      Panel.toast('Rehashing ' + name + '…', 'ok');
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  }, false);
+}
+
+loadServers();
+</script>
+{% endblock %}

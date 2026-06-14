@@ -1,0 +1,449 @@
+{% extends "base.html" %}
+{% block title %}Settings — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div><div class="page-title">Settings</div></div>
+</div>
+
+<div class="tab-bar" style="margin-bottom:16px">
+  <button class="tab-btn active" onclick="showTab('account', this)">My Account</button>
+  {% if can('manage_users') %}
+  <button class="tab-btn" onclick="showTab('panel-users', this)">Panel Users</button>
+  <button class="tab-btn" onclick="showTab('rpc-servers', this)">RPC Servers</button>
+  {% endif %}
+</div>
+
+<!-- ── My Account ────────────────────────────────────────────────────────── -->
+<div id="tab-account">
+  <div class="detail-grid" style="max-width:640px">
+
+    <div class="detail-card">
+      <div class="detail-card-title">Account Info</div>
+      <table class="detail-table">
+        <tr><th>Username</th><td class="td-mono">{{ current_user }}</td></tr>
+        <tr><th>Role</th><td>
+          <span class="badge {% if current_role == 'admin' %}badge-amber{% else %}badge-muted{% endif %}">
+            {{ current_role }}
+          </span>
+        </td></tr>
+      </table>
+    </div>
+
+    <div class="detail-card">
+      <div class="detail-card-title">Permissions</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px;padding:2px 0">
+        {% if current_role == 'admin' %}
+          <span class="badge badge-amber">All permissions</span>
+        {% else %}
+          {% for perm in user_perms %}
+            <span class="badge badge-muted">{{ perm }}</span>
+          {% else %}
+            <span class="text-muted" style="font-size:12px">No permissions assigned</span>
+          {% endfor %}
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Password change -->
+  {% set is_env = (current_user == env_admin_user) %}
+  <div class="table-wrap" style="max-width:420px;margin-top:16px">
+    <div class="table-toolbar"><span class="table-title">Change Password</span></div>
+    {% if is_env %}
+    <div style="padding:16px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;font-size:12px">
+      The primary admin password is set via <code>PANEL_PASSWORD</code> in <code>.env</code>.
+    </div>
+    {% else %}
+    <div style="padding:16px;display:flex;flex-direction:column;gap:12px">
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Current Password</label>
+        <input class="form-input" id="pwCurrent" type="password" autocomplete="current-password">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">New Password</label>
+        <input class="form-input" id="pwNew" type="password" autocomplete="new-password">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Confirm New Password</label>
+        <input class="form-input" id="pwConfirm" type="password" autocomplete="new-password">
+      </div>
+      <button class="btn btn-primary" style="align-self:flex-start" onclick="changePassword()">
+        Update Password
+      </button>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if can('manage_users') %}
+
+<!-- ── Panel Users ────────────────────────────────────────────────────────── -->
+<div id="tab-panel-users" style="display:none">
+  <div class="table-wrap">
+    <div class="table-toolbar">
+      <span class="table-title">Panel Users</span>
+      <button class="btn btn-primary btn-sm" onclick="openAddUser()">+ Add User</button>
+    </div>
+    <div class="table-outer">
+      <table>
+        <thead><tr><th>Username</th><th>Role</th><th>Permissions</th><th>Last Login</th><th></th></tr></thead>
+        <tbody id="panelUsersTbody">
+          <tr><td colspan="4" class="table-state">⟳ loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── RPC Servers ────────────────────────────────────────────────────────── -->
+<div id="tab-rpc-servers" style="display:none">
+  <div class="table-wrap">
+    <div class="table-toolbar">
+      <span class="table-title">RPC Servers</span>
+      <button class="btn btn-primary btn-sm" onclick="Panel.openModal('addRpcModal')">+ Add Server</button>
+    </div>
+    <div class="table-outer">
+      <table>
+        <thead><tr><th>Name</th><th>Host</th><th>Port</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rpcServersTbody">
+          <tr><td colspan="5" class="table-state">⟳ loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Add User modal -->
+<div class="modal-backdrop" id="addUserModal">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header"><span class="modal-title" id="userModalTitle">Add Panel User</span><button class="modal-close">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input class="form-input" id="modalUsername" type="text" autocomplete="off">
+      </div>
+      <div class="form-group" id="modalPasswordGroup">
+        <label class="form-label">Password</label>
+        <input class="form-input" id="modalPassword" type="password" autocomplete="new-password">
+      </div>
+      <div id="modalEditPwHint" style="display:none;font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-bottom:10px">
+        Leave blank to keep existing password
+      </div>
+      <div class="form-group">
+        <label class="form-label">Role</label>
+        <select class="form-select" id="modalRole" onchange="togglePermSection()">
+          <option value="admin">Admin (all permissions)</option>
+          <option value="viewer" selected>Custom permissions</option>
+        </select>
+      </div>
+      <div id="modalPermSection">
+        <div class="form-label" style="margin-bottom:8px">Permissions</div>
+        <div id="modalPermCheckboxes" style="display:flex;flex-direction:column;gap:7px;max-height:260px;overflow-y:auto;padding-right:4px">
+          <span class="text-muted" style="font-size:12px">Loading…</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal-close>Cancel</button>
+      <button class="btn btn-primary" id="userModalSaveBtn">Add User</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add RPC Server modal -->
+<div class="modal-backdrop" id="addRpcModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header"><span class="modal-title">Add RPC Server</span><button class="modal-close">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Display Name</label>
+        <input class="form-input" id="rpcName" type="text" placeholder="Main Server">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Host</label>
+        <input class="form-input" id="rpcHost" type="text" placeholder="127.0.0.1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Port</label>
+        <input class="form-input" id="rpcPort" type="number" value="8600">
+      </div>
+      <div class="form-group">
+        <label class="form-label">RPC User</label>
+        <input class="form-input" id="rpcUser" type="text" placeholder="webpanel">
+      </div>
+      <div class="form-group">
+        <label class="form-label">RPC Password</label>
+        <input class="form-input" id="rpcPassword" type="password" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label class="form-label">TLS Verify</label>
+        <select class="form-select" id="rpcTls">
+          <option value="false">No (self-signed / localhost)</option>
+          <option value="true">Yes (real cert)</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal-close>Cancel</button>
+      <button class="btn btn-ghost" id="rpcTestBtn">Test</button>
+      <button class="btn btn-primary" id="rpcAddBtn">Add</button>
+    </div>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ENV_ADMIN = {{ env_admin_user | tojson }};
+let allPerms = {};
+let userMap = {};            // username -> user object, avoids JSON-in-onclick
+let userModalMode = 'add';  // 'add' or 'edit'
+let editingUsername = null;
+
+function showTab(name, btn) {
+  document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).style.display = '';
+  btn.classList.add('active');
+  if (name === 'panel-users') loadPanelUsers();
+  if (name === 'rpc-servers') loadRpcServers();
+}
+
+// ── Password change ──────────────────────────────────────────────────────
+async function changePassword() {
+  const current = document.getElementById('pwCurrent')?.value || '';
+  const nw      = document.getElementById('pwNew')?.value || '';
+  const confirm = document.getElementById('pwConfirm')?.value || '';
+  if (!current || !nw) { Panel.toast('Fill in all fields', 'error'); return; }
+  if (nw !== confirm)  { Panel.toast('New passwords do not match', 'error'); return; }
+  if (nw.length < 8)   { Panel.toast('Password must be at least 8 characters', 'error'); return; }
+  try {
+    await Panel.apiPost('/api/account/password', { current, new: nw });
+    Panel.toast('Password updated successfully', 'ok');
+    document.getElementById('pwCurrent').value = '';
+    document.getElementById('pwNew').value = '';
+    document.getElementById('pwConfirm').value = '';
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+// ── Permissions helpers ──────────────────────────────────────────────────
+async function ensurePerms() {
+  if (Object.keys(allPerms).length) return;
+  try { allPerms = await Panel.apiGet('/api/settings/permissions'); } catch(e) {}
+}
+
+function buildPermCheckboxes(containerId, selectedPerms) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = Object.entries(allPerms).map(([key, label]) => `
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+      <input type="checkbox" value="${key}" ${selectedPerms.includes(key) ? 'checked' : ''}
+             style="accent-color:var(--accent);width:14px;height:14px;flex-shrink:0">
+      <span style="color:var(--text-2);font-size:13px">${label}</span>
+      <span class="td-mono text-muted" style="font-size:10px;margin-left:auto">${key}</span>
+    </label>`).join('');
+}
+
+function getCheckedPerms(containerId) {
+  return [...document.getElementById(containerId).querySelectorAll('input:checked')]
+    .map(cb => cb.value);
+}
+
+function togglePermSection() {
+  const isAdmin = document.getElementById('modalRole').value === 'admin';
+  const section = document.getElementById('modalPermSection');
+  section.style.opacity = isAdmin ? '.4' : '1';
+  section.style.pointerEvents = isAdmin ? 'none' : '';
+}
+
+// ── Panel Users ──────────────────────────────────────────────────────────
+async function loadPanelUsers() {
+  try {
+    const users = await Panel.apiGet('/api/settings/users');
+    userMap = {};
+    users.forEach(u => { userMap[u.username] = u; });
+    Panel.renderTable('panelUsersTbody', users.map(u => {
+      const isEnv = u.username === ENV_ADMIN;
+      const permsHtml = u.role === 'admin'
+        ? '<span class="badge badge-amber">all</span>'
+        : (u.permissions||[]).length
+          ? (u.permissions||[]).map(p => `<span class="badge badge-muted" style="font-size:9px">${Panel.esc(p)}</span>`).join(' ')
+          : '<span class="text-muted" style="font-size:11px">none</span>';
+      return `<tr>
+        <td class="td-main td-mono">
+          ${Panel.esc(u.username)}
+          ${isEnv ? '<span class="badge badge-green" style="font-size:9px;margin-left:4px">env</span>' : ''}
+        </td>
+        <td><span class="badge ${u.role==='admin'?'badge-amber':'badge-muted'}">${Panel.esc(u.role)}</span></td>
+        <td style="max-width:300px;white-space:normal;line-height:1.9">${permsHtml}</td>
+        <td class="td-mono text-muted" style="font-size:11px;white-space:nowrap">${u.last_login ? (() => { const d = new Date(u.last_login); return d.toLocaleDateString([], {month:'short',day:'numeric',year:'numeric'}) + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); })() : '<span style="color:var(--text-3)">never</span>'}</td>
+        <td>${!isEnv ? `<div class="flex gap-8">
+          <button class="btn btn-ghost btn-sm" data-edit-user="${Panel.esc(u.username)}">edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteUser('${Panel.esc(u.username)}')">remove</button>
+        </div>` : ''}</td>
+      </tr>`;
+    }), 'No panel users');
+  } catch(e) { Panel.tableErrorState('panelUsersTbody', e.message); }
+}
+
+async function openAddUser() {
+  await ensurePerms();
+  userModalMode = 'add';
+  editingUsername = null;
+  document.getElementById('userModalTitle').textContent = 'Add Panel User';
+  document.getElementById('userModalSaveBtn').textContent = 'Add User';
+  document.getElementById('modalUsername').value = '';
+  document.getElementById('modalUsername').disabled = false;
+  document.getElementById('modalPassword').value = '';
+  document.getElementById('modalPasswordGroup').style.display = '';
+  document.getElementById('modalEditPwHint').style.display = 'none';
+  document.getElementById('modalRole').value = 'viewer';
+  buildPermCheckboxes('modalPermCheckboxes', []);
+  togglePermSection();
+  Panel.openModal('addUserModal');
+  Panel.initPasswordToggles(document.getElementById('addUserModal'));
+}
+
+async function openEditUser(u) {
+  await ensurePerms();
+  userModalMode = 'edit';
+  editingUsername = u.username;
+  document.getElementById('userModalTitle').textContent = 'Edit User: ' + u.username;
+  document.getElementById('userModalSaveBtn').textContent = 'Save Changes';
+  document.getElementById('modalUsername').value = u.username;
+  document.getElementById('modalUsername').disabled = true;
+  document.getElementById('modalPassword').value = '';
+  document.getElementById('modalPasswordGroup').style.display = '';
+  document.getElementById('modalEditPwHint').style.display = '';
+  document.getElementById('modalRole').value = u.role;
+  buildPermCheckboxes('modalPermCheckboxes', u.permissions || []);
+  togglePermSection();
+  Panel.openModal('addUserModal');
+  Panel.initPasswordToggles(document.getElementById('addUserModal'));
+}
+
+document.getElementById('userModalSaveBtn')?.addEventListener('click', async () => {
+  const username = document.getElementById('modalUsername').value.trim();
+  const password = document.getElementById('modalPassword').value;
+  const role     = document.getElementById('modalRole').value;
+  const perms    = role === 'admin' ? [] : getCheckedPerms('modalPermCheckboxes');
+
+  if (userModalMode === 'add') {
+    if (!username || !password) { Panel.toast('Fill in all fields', 'error'); return; }
+    try {
+      await Panel.apiPost('/api/settings/users', { username, password, role, permissions: perms });
+      Panel.toast('User added', 'ok');
+      Panel.closeModal('addUserModal');
+      loadPanelUsers();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  } else {
+    const payload = { role, permissions: perms };
+    if (password) payload.password = password;
+    try {
+      const res = await fetch('/api/settings/users/' + encodeURIComponent(editingUsername), {
+        method: 'PUT', credentials: 'same-origin',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      Panel.toast('User updated', 'ok');
+      Panel.closeModal('addUserModal');
+      loadPanelUsers();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  }
+});
+
+async function deleteUser(username) {
+  Panel.confirm('Remove User', 'Remove panel user "' + username + '"?', async () => {
+    try {
+      await Panel.apiDelete('/api/settings/users/' + encodeURIComponent(username));
+      Panel.toast('User removed', 'ok');
+      loadPanelUsers();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+// ── RPC Servers ──────────────────────────────────────────────────────────
+async function loadRpcServers() {
+  try {
+    const servers = await Panel.apiGet('/api/settings/rpc-servers');
+    Panel.renderTable('rpcServersTbody', servers.map(s => `<tr>
+      <td class="td-main td-mono">${Panel.esc(s.name)}</td>
+      <td class="td-mono text-muted">${Panel.esc(s.host)}</td>
+      <td class="td-mono text-muted">${s.port}</td>
+      <td><span class="badge ${s.active?'badge-green':'badge-muted'}">${s.active?'active':'idle'}</span></td>
+      <td><div class="flex gap-8">
+        ${!s.active ? `<button class="btn btn-ghost btn-sm" onclick="activateRpc('${Panel.esc(s.name)}')">activate</button>` : ''}
+        <button class="btn btn-danger btn-sm" onclick="deleteRpc('${Panel.esc(s.name)}')">remove</button>
+      </div></td>
+    </tr>`), 'No RPC servers configured');
+  } catch(e) { Panel.tableErrorState('rpcServersTbody', e.message); }
+}
+
+document.getElementById('rpcTestBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('rpcTestBtn');
+  btn.textContent = '…'; btn.disabled = true;
+  try {
+    await Panel.apiPost('/api/settings/rpc-servers/test', getRpcFormData());
+    Panel.toast('Connection successful', 'ok');
+  } catch(e) { Panel.toast('Failed: ' + e.message, 'error'); }
+  finally { btn.textContent = 'Test'; btn.disabled = false; }
+});
+
+document.getElementById('rpcAddBtn')?.addEventListener('click', async () => {
+  const d = getRpcFormData();
+  if (!d.name || !d.host || !d.rpc_user || !d.rpc_password) {
+    Panel.toast('Fill in all fields', 'error'); return;
+  }
+  try {
+    await Panel.apiPost('/api/settings/rpc-servers', d);
+    Panel.toast('RPC server added', 'ok');
+    Panel.closeModal('addRpcModal');
+    loadRpcServers();
+  } catch(e) { Panel.toast(e.message, 'error'); }
+});
+
+function getRpcFormData() {
+  return {
+    name:         document.getElementById('rpcName').value.trim(),
+    host:         document.getElementById('rpcHost').value.trim(),
+    port:         parseInt(document.getElementById('rpcPort').value)||8600,
+    rpc_user:     document.getElementById('rpcUser').value.trim(),
+    rpc_password: document.getElementById('rpcPassword').value,
+    tls_verify:   document.getElementById('rpcTls').value === 'true',
+  };
+}
+
+async function activateRpc(name) {
+  try {
+    await Panel.apiPost('/api/settings/rpc-servers/' + encodeURIComponent(name) + '/activate');
+    Panel.toast('Switched to ' + name, 'ok');
+    loadRpcServers();
+  } catch(e) { Panel.toast(e.message, 'error'); }
+}
+
+async function deleteRpc(name) {
+  Panel.confirm('Remove RPC Server', 'Remove "' + name + '"?', async () => {
+    try {
+      await Panel.apiDelete('/api/settings/rpc-servers/' + encodeURIComponent(name));
+      Panel.toast('Removed', 'ok');
+      loadRpcServers();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  Panel.initPasswordToggles();
+  document.getElementById('panelUsersTbody').addEventListener('click', e => {
+    const btn = e.target.closest('[data-edit-user]');
+    if (btn) openEditUser(userMap[btn.dataset.editUser]);
+  });
+});
+</script>
+{% endblock %}
