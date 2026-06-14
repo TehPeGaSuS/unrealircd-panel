@@ -56,7 +56,8 @@ unrealircd-panel/
 
 ```bash
 cd ~/unrealircd-panel
-pip install -r requirements.txt --break-system-packages
+python3 -m venv virtualenv
+./virtualenv/bin/pip install -r requirements.txt
 ```
 
 ### 2. Configure
@@ -120,15 +121,6 @@ journalctl --user -u unrealircd-panel -f
 ```
 
 The panel listens on `127.0.0.1:5000`.
-
----
-
-## Cloudflare Zero Trust tunnel
-
-Point a CF tunnel ingress rule at `http://127.0.0.1:5000`.
-
-**Important:** enable "Match SNI to Host" on the tunnel ingress rule,
-otherwise Apache/nginx cert matching will fail if you have other vhosts.
 
 ---
 
