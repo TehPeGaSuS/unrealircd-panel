@@ -104,7 +104,7 @@ Then rehash or restart UnrealIRCd.
 ```bash
 cd ~/unrealircd-panel/panel
 source ../.env  # or: set -a; source ../.env; set +a
-python app.py
+./virtualenv/bin/python app.py
 ```
 
 ### 5. Run (production — systemd)
