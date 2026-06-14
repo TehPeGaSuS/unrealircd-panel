@@ -120,7 +120,8 @@ systemctl --user status unrealircd-panel
 journalctl --user -u unrealircd-panel -f
 ```
 
-The panel listens on `127.0.0.1:5000`.
+The panel listens on `127.0.0.1:5000`.  
+You should use a reverse proxy so you can have proper TLS.
 
 ---
 
