@@ -194,9 +194,9 @@ async function loadBans() {
       const expireTs = b.expire_at ? new Date(b.expire_at).getTime() : 9999999999999;
       const banId    = b.id || '';
       const hits     = b.hits ?? '—';
-      const lastHit  = b.last_hit ? Panel.fmtDate(b.last_hit) : '—';
+      const lastHit  = b.last_hit_at ? Panel.fmtDate(b.last_hit_at) : '—';
       const hitsTs   = typeof b.hits === 'number' ? b.hits : -1;
-      const lastHitTs = b.last_hit ? new Date(b.last_hit).getTime() : 0;
+      const lastHitTs = b.last_hit_at ? new Date(b.last_hit_at).getTime() : 0;
       const badge   = TYPE_BADGES[type.toLowerCase()] || 'badge-muted';
       const key     = Panel.esc(name) + '|' + Panel.esc(type);
       const cbCol   = CAN_DEL

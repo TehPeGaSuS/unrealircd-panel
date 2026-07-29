@@ -433,6 +433,19 @@ class Spamfilter(_Namespace):
 
 
 # ---------------------------------------------------------------------------
+# security_group.*  (read-only — defined in unrealircd.conf, not RPC-editable)
+# ---------------------------------------------------------------------------
+
+class SecurityGroup(_Namespace):
+    def get_all(self) -> List[Any]:
+        result = self._q("security_group.list")
+        return result.get("list", []) if isinstance(result, dict) else []
+
+    def get(self, name: str) -> Optional[Any]:
+        return self._q("security_group.get", {"name": name})
+
+
+# ---------------------------------------------------------------------------
 # log.*
 # ---------------------------------------------------------------------------
 

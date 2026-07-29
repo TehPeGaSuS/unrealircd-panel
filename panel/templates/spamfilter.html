@@ -266,9 +266,9 @@ async function loadSf() {
       const setAt    = sf.set_at ? Panel.fmtDate(sf.set_at) : '—';
       const setAtTs  = sf.set_at ? new Date(sf.set_at).getTime() : 0;
       const hits      = sf.hits ?? '—';
-      const lastHit   = sf.last_hit ? Panel.fmtDate(sf.last_hit) : '—';
+      const lastHit   = sf.last_hit_at ? Panel.fmtDate(sf.last_hit_at) : '—';
       const hitsTs    = typeof sf.hits === 'number' ? sf.hits : -1;
-      const lastHitTs = sf.last_hit ? new Date(sf.last_hit).getTime() : 0;
+      const lastHitTs = sf.last_hit_at ? new Date(sf.last_hit_at).getTime() : 0;
       const badge    = ACTION_BADGES[action.toLowerCase()] || 'badge-muted';
 
       return `<tr data-search="${Panel.esc(pattern)} ${Panel.esc(targets)} ${Panel.esc(action)} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
@@ -318,7 +318,7 @@ function openDrawer(key) {
   document.getElementById('sfDrawerSetBy').textContent = sf.set_by || '—';
   document.getElementById('sfDrawerSetAt').textContent = sf.set_at ? Panel.fmtDate(sf.set_at) : '—';
   document.getElementById('sfDrawerHits').textContent = sf.hits ?? '—';
-  document.getElementById('sfDrawerLastHit').textContent = sf.last_hit ? Panel.fmtDate(sf.last_hit) : '—';
+  document.getElementById('sfDrawerLastHit').textContent = sf.last_hit_at ? Panel.fmtDate(sf.last_hit_at) : '—';
   document.getElementById('sfDrawerReason').textContent = sf.reason || '—';
 
   Panel.openDrawer('sfDrawer');

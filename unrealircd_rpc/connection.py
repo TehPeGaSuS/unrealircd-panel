@@ -293,6 +293,10 @@ class Connection:
         from .namespaces import Spamfilter
         return Spamfilter(self)
 
+    def security_group(self):
+        from .namespaces import SecurityGroup
+        return SecurityGroup(self)
+
     def stats(self):
         from .namespaces import Stats
         return Stats(self)

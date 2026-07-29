@@ -56,6 +56,8 @@ ALL_PERMISSIONS = {
     "view_bans":     "View Bans",
     "ban_add":       "Add Bans",
     "ban_del":       "Remove Bans",
+    # Security groups
+    "view_security_groups": "View Security Groups",
     # Logs
     "view_logs":     "View Logs",
     # Panel admin
@@ -287,6 +289,11 @@ def elines():
 @permission_required("view_users")
 def usermap():
     return render_template("map.html", page="map")
+
+@app.route("/security-groups")
+@permission_required("view_security_groups")
+def security_groups():
+    return render_template("security_groups.html", page="security_groups")
 
 @app.route("/logs")
 @permission_required("view_logs")
@@ -611,6 +618,24 @@ def api_elines_delete(name):
     if err: return jsonify({"error": err}), 503
     return jsonify({"ok": True})
 
+
+# ---------------------------------------------------------------------------
+# API: Security groups (read-only — defined in unrealircd.conf)
+# ---------------------------------------------------------------------------
+@app.route("/api/security-groups")
+@permission_required("view_security_groups")
+def api_security_groups_list():
+    result, err = rpc_call(lambda c: c.security_group().get_all())
+    if err: return jsonify({"error": err}), 503
+    return jsonify(result or [])
+
+@app.route("/api/security-groups/<name>")
+@permission_required("view_security_groups")
+def api_security_group_detail(name):
+    result, err = rpc_call(lambda c: c.security_group().get(name))
+    if err: return jsonify({"error": err}), 503
+    if result is None: return jsonify({"error": "Security group not found"}), 404
+    return jsonify(result)
 
 @app.route("/api/logs/stream")
 @permission_required("view_logs")

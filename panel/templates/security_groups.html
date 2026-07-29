@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Security Groups — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Security Groups{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Security Groups</div>
+    <div class="page-subtitle" id="sgCount">—</div>
+  </div>
+  <button class="btn btn-ghost btn-sm" onclick="loadSg()">↻ Refresh</button>
+</div>
+
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Defined Groups</span>
+    <span class="text-muted" style="font-size:12px">Read-only — defined in unrealircd.conf, edit via config + rehash</span>
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort-col="0">Name</th>
+          <th data-sort-col="1">Priority</th>
+          <th>Visibility</th>
+          <th>Criteria</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="sgTbody">
+        <tr><td colspan="5" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Detail drawer -->
+<div class="drawer-backdrop" id="sgDrawerBackdrop"></div>
+<div class="drawer" id="sgDrawer">
+  <div class="drawer-header">
+    <span class="drawer-title" id="sgDrawerTitle">Security Group</span>
+    <button class="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="detail-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="detail-card">
+        <div class="detail-card-title">Priority</div>
+        <div id="sgDrawerPriority" class="td-mono" style="color:var(--text-2);font-size:13px"></div>
+      </div>
+      <div class="detail-card">
+        <div class="detail-card-title">Visibility</div>
+        <div id="sgDrawerVisibility" style="font-size:13px"></div>
+      </div>
+    </div>
+
+    <div id="sgDrawerRuleWrap" style="display:none;margin-bottom:16px">
+      <div class="section-title">Rule</div>
+      <div id="sgDrawerRule" class="td-mono" style="word-break:break-all;color:var(--text-2);font-size:12px;padding:4px 0"></div>
+    </div>
+
+    <div class="section-title">Inclusion Criteria</div>
+    <div id="sgDrawerInclude" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:16px"></div>
+
+    <div id="sgDrawerExcludeWrap" style="display:none">
+      <div class="section-title">Exclusion Criteria</div>
+      <div id="sgDrawerExclude" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:16px"></div>
+    </div>
+
+    <div id="sgDrawerDescWrap" style="display:none">
+      <div class="section-title">Description</div>
+      <div id="sgDrawerDesc" style="color:var(--text-2);font-size:13px;padding:4px 0 16px"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let sgMap = {};   // name -> entry, for drawer lookup
+
+// Fields that are simple lists of strings (name/mask lists)
+const LIST_FIELDS = ['ip', 'mask', 'server_port', 'security_group', 'destination'];
+const LIST_LABELS = {
+  ip: 'IP', mask: 'Mask', server_port: 'Server port',
+  security_group: 'Security group', destination: 'Destination',
+};
+
+// Boolean/scalar inclusion criteria and their display labels
+const CRITERIA_FIELDS = [
+  ['identified',        'Identified'],
+  ['webirc',             'WebIRC'],
+  ['websocket',           'WebSocket'],
+  ['tls',                 'TLS'],
+  ['reputation_score',   v => `Reputation ≥ ${v}`],
+  ['connect_time',       v => `Connected ≥ ${v}s`],
+];
+const EXCLUDE_FIELDS = [
+  ['exclude_identified',       'Identified'],
+  ['exclude_webirc',            'WebIRC'],
+  ['exclude_websocket',          'WebSocket'],
+  ['exclude_tls',                'TLS'],
+  ['exclude_reputation_score',  v => `Reputation ≥ ${v}`],
+  ['exclude_connect_time',      v => `Connected ≥ ${v}s`],
+];
+
+function criteriaTags(sg, fields, listPrefix) {
+  const tags = [];
+  fields.forEach(([key, label]) => {
+    const v = sg[key];
+    if (v === undefined || v === null || v === false) return;
+    const text = typeof label === 'function' ? label(v) : label;
+    tags.push(`<span class="badge badge-muted">${Panel.esc(text)}</span>`);
+  });
+  LIST_FIELDS.forEach(key => {
+    const fullKey = listPrefix + key;
+    const list = sg[fullKey];
+    if (Array.isArray(list) && list.length) {
+      tags.push(`<span class="badge badge-muted" title="${Panel.esc(list.join(', '))}">${LIST_LABELS[key]}: ${list.length}</span>`);
+    }
+  });
+  return tags;
+}
+
+function summaryText(sg) {
+  const tags = criteriaTags(sg, CRITERIA_FIELDS, '');
+  if (sg.rule) tags.unshift('<span class="badge badge-amber">rule</span>');
+  return tags.length ? tags.join(' ') : '<span class="text-muted">—</span>';
+}
+
+// ── Load ─────────────────────────────────────────────────────────────────
+async function loadSg() {
+  try {
+    const groups = await Panel.apiGet('/api/security-groups');
+    document.getElementById('sgCount').textContent = groups.length + ' group' + (groups.length !== 1 ? 's' : '');
+
+    sgMap = {};
+    groups.forEach(sg => { sgMap[sg.name] = sg; });
+
+    if (!groups.length) { Panel.renderTable('sgTbody', [], 'No security groups'); return; }
+
+    Panel.renderTable('sgTbody', groups.map(sg => {
+      const name     = sg.name || '?';
+      const priority = typeof sg.priority === 'number' ? sg.priority : '—';
+      const isPublic = sg.public !== false;
+      const builtin  = !!sg.builtin;
+      const visBadge = builtin
+        ? '<span class="badge badge-muted">builtin</span>'
+        : (isPublic ? '<span class="badge badge-muted">public</span>' : '<span class="badge badge-amber">private</span>');
+
+      return `<tr data-search="${Panel.esc(name)}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${typeof sg.priority === 'number' ? sg.priority : -1}"
+                  style="cursor:pointer" onclick="openDrawer('${Panel.esc(name).replace(/'/g,"\\'")}')">
+        <td class="td-main td-mono">${Panel.esc(name)}</td>
+        <td class="td-mono text-muted">${priority}</td>
+        <td>${visBadge}</td>
+        <td>${summaryText(sg)}</td>
+        <td></td>
+      </tr>`;
+    }));
+
+    Panel.initTableSearch('sgSearch', 'sgTbody');
+    Panel.initSortableTable('sgTbody');
+
+  } catch(e) { Panel.tableErrorState('sgTbody', e.message); }
+}
+
+// ── Drawer ────────────────────────────────────────────────────────────────
+async function openDrawer(name) {
+  let sg = sgMap[name];
+  if (!sg) return;
+
+  // List/get(0) omits detail — fetch full detail (level 1) for the drawer
+  try {
+    sg = await Panel.apiGet('/api/security-groups/' + encodeURIComponent(name));
+  } catch (e) { /* fall back to list-level data */ }
+
+  document.getElementById('sgDrawerTitle').textContent = sg.name || name;
+  document.getElementById('sgDrawerPriority').textContent = (typeof sg.priority === 'number') ? sg.priority : '—';
+
+  const isPublic = sg.public !== false;
+  const builtin  = !!sg.builtin;
+  document.getElementById('sgDrawerVisibility').innerHTML = builtin
+    ? '<span class="badge badge-muted">builtin</span>'
+    : (isPublic ? '<span class="badge badge-muted">public</span>' : '<span class="badge badge-amber">private</span>');
+
+  if (sg.rule) {
+    document.getElementById('sgDrawerRuleWrap').style.display = '';
+    document.getElementById('sgDrawerRule').textContent = sg.rule;
+  } else {
+    document.getElementById('sgDrawerRuleWrap').style.display = 'none';
+  }
+
+  const includeTags = criteriaTags(sg, CRITERIA_FIELDS, '');
+  document.getElementById('sgDrawerInclude').innerHTML =
+    includeTags.length ? includeTags.join(' ') : '<span class="text-muted">No inclusion criteria (matches all)</span>';
+
+  const excludeTags = criteriaTags(sg, EXCLUDE_FIELDS, 'exclude_');
+  if (excludeTags.length) {
+    document.getElementById('sgDrawerExcludeWrap').style.display = '';
+    document.getElementById('sgDrawerExclude').innerHTML = excludeTags.join(' ');
+  } else {
+    document.getElementById('sgDrawerExcludeWrap').style.display = 'none';
+  }
+
+  if (sg.description) {
+    document.getElementById('sgDrawerDescWrap').style.display = '';
+    document.getElementById('sgDrawerDesc').textContent = sg.description;
+  } else {
+    document.getElementById('sgDrawerDescWrap').style.display = 'none';
+  }
+
+  Panel.openDrawer('sgDrawer');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadSg();
+});
+</script>
+{% endblock %}
