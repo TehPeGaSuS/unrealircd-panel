@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Q-Lines — {{ network_name }} Panel{% endblock %}
+{% block topbar_title %}Q-Lines{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Q-Lines <span style="font-size:13px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">(Nick Bans)</span></div>
+    <div class="page-subtitle" id="qlineCount">—</div>
+  </div>
+  <div class="flex gap-8">
+    <button class="btn btn-ghost btn-sm" onclick="loadQlines()">↻ Refresh</button>
+    {% if can('ban_add') %}
+    <button class="btn btn-primary btn-sm" onclick="Panel.openModal('addQlineModal')">+ Add Q-Line</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="table-wrap">
+  <div class="table-toolbar">
+    <span class="table-title">Active Q-Lines</span>
+    <input class="search-input" id="qlineSearch" type="search" placeholder="Filter…">
+  </div>
+  <div class="table-outer">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort-col="0">Nick mask</th>
+          <th>Reason</th>
+          <th>Set by</th>
+          <th data-sort-col="1">Set</th>
+          <th data-sort-col="2">Expires</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="qlineTbody">
+        <tr><td colspan="6" class="table-state">⟳ loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add Q-Line modal -->
+<div class="modal-backdrop" id="addQlineModal">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <span class="modal-title">Add Q-Line</span>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="form-group">
+        <label class="form-label">Nick mask</label>
+        <input class="form-input" id="qlineName" type="text" placeholder="BadNick or *Bot*">
+        <div style="font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-top:4px">
+          Wildcards (<code>*</code>, <code>?</code>) are supported
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Duration <span style="color:var(--text-3);font-weight:400">(leave blank for permanent)</span></label>
+        <input class="form-input" id="qlineDuration" type="text" placeholder="1d / 2w / blank = permanent">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Reason</label>
+        <input class="form-input" id="qlineReason" type="text" placeholder="Why this nick is banned">
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-modal-close>Cancel</button>
+      <button class="btn btn-primary" id="qlineAddBtn">Add Q-Line</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CAN_DEL = {{ 'true' if can('ban_del') else 'false' }};
+
+// ── Load ─────────────────────────────────────────────────────────────────
+async function loadQlines() {
+  try {
+    const entries = await Panel.apiGet('/api/qlines');
+    document.getElementById('qlineCount').textContent =
+      entries.length + ' Q-Line' + (entries.length === 1 ? '' : 's');
+
+    if (!entries.length) { Panel.renderTable('qlineTbody', [], 'No Q-Lines'); return; }
+
+    Panel.renderTable('qlineTbody', entries.map(q => {
+      const name    = q.name || '?';
+      const reason  = q.reason || '—';
+      const setBy   = q.set_by || '—';
+      const setAt   = q.set_at ? Panel.fmtDate(q.set_at) : '—';
+      const expires = q.expire_at ? Panel.fmtDate(q.expire_at) : 'permanent';
+      const setAtTs  = q.set_at ? new Date(q.set_at).getTime() : 0;
+      const expireTs = q.expire_at ? new Date(q.expire_at).getTime() : 9999999999999;
+
+      return `<tr data-search="${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
+                  data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${expireTs}">
+        <td class="td-mono td-main">${Panel.esc(name)}</td>
+        <td class="text-muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setBy)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
+        <td class="td-mono text-muted">${Panel.esc(expires)}</td>
+        <td>
+          ${CAN_DEL ? `<button class="btn btn-danger btn-sm" onclick="deleteQline('${Panel.esc(name).replace(/'/g,"\\'")}')">remove</button>` : ''}
+        </td>
+      </tr>`;
+    }));
+
+    Panel.initTableSearch('qlineSearch', 'qlineTbody');
+    Panel.initSortableTable('qlineTbody');
+
+  } catch(e) { Panel.tableErrorState('qlineTbody', e.message); }
+}
+
+// ── Delete ────────────────────────────────────────────────────────────────
+async function deleteQline(name) {
+  Panel.confirm('Remove Q-Line', `Remove Q-Line for "${name}"?`, async () => {
+    try {
+      await Panel.apiDelete('/api/qlines/' + encodeURIComponent(name));
+      Panel.toast('Q-Line removed', 'ok');
+      loadQlines();
+    } catch(e) { Panel.toast(e.message, 'error'); }
+  });
+}
+
+// ── Add ───────────────────────────────────────────────────────────────────
+document.getElementById('qlineAddBtn').addEventListener('click', async () => {
+  const name     = document.getElementById('qlineName').value.trim();
+  const duration = document.getElementById('qlineDuration').value.trim() || null;
+  const reason   = document.getElementById('qlineReason').value.trim();
+
+  if (!name)   { Panel.toast('Enter a nick mask', 'error'); return; }
+  if (!reason) { Panel.toast('Enter a reason', 'error'); return; }
+
+  try {
+    await Panel.apiPost('/api/qlines', {
+      name:     name,
+      reason:   reason,
+      duration: duration,
+    });
+    Panel.toast('Q-Line added', 'ok');
+    Panel.closeModal('addQlineModal');
+    document.getElementById('qlineName').value = '';
+    document.getElementById('qlineReason').value = '';
+    document.getElementById('qlineDuration').value = '';
+    loadQlines();
+  } catch(e) { Panel.toast(e.message, 'error'); }
+});
+
+loadQlines();
+</script>
+{% endblock %}

@@ -60,6 +60,10 @@
       <span class="nav-icon">⊗</span>
       <span class="nav-label">Spamfilter</span>
     </a>
+    <a href="{{ url_for('qlines') }}" class="nav-item {% if page == 'qlines' %}active{% endif %}">
+      <span class="nav-icon">◍</span>
+      <span class="nav-label">Q-Lines</span>
+    </a>
     <a href="{{ url_for('elines') }}" class="nav-item {% if page == 'elines' %}active{% endif %}">
       <span class="nav-icon">◌</span>
       <span class="nav-label">Exceptions</span>

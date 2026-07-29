@@ -280,6 +280,11 @@ def bans():
 def spamfilter():
     return render_template("spamfilter.html", page="spamfilter")
 
+@app.route("/qlines")
+@permission_required("view_bans")
+def qlines():
+    return render_template("qlines.html", page="qlines")
+
 @app.route("/elines")
 @permission_required("view_bans")
 def elines():
@@ -585,6 +590,35 @@ def api_spamfilter_delete():
         d.get("spamfilter_targets", "p"),
         d.get("ban_action", "block"),
     ))
+    if err: return jsonify({"error": err}), 503
+    return jsonify({"ok": True})
+
+# ---------------------------------------------------------------------------
+# API: Q-Lines (nick bans)
+# ---------------------------------------------------------------------------
+@app.route("/api/qlines")
+@permission_required("view_bans")
+def api_qlines_list():
+    result, err = rpc_call(lambda c: c.name_ban().get_all())
+    if err: return jsonify({"error": err}), 503
+    return jsonify(result or [])
+
+@app.route("/api/qlines", methods=["POST"])
+@permission_required("ban_add")
+def api_qlines_add():
+    d = request.get_json() or {}
+    result, err = rpc_call(lambda c: c.name_ban().add(
+        d.get("name", ""),
+        d.get("reason", ""),
+        d.get("duration") or "0",
+    ))
+    if err: return jsonify({"error": err}), 503
+    return jsonify({"ok": True})
+
+@app.route("/api/qlines/<path:name>", methods=["DELETE"])
+@permission_required("ban_del")
+def api_qlines_delete(name):
+    result, err = rpc_call(lambda c: c.name_ban().delete(name))
     if err: return jsonify({"error": err}), 503
     return jsonify({"ok": True})
 
