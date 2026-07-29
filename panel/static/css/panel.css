@@ -741,6 +741,8 @@ body.login-page {
   height: auto;
   object-fit: contain;
 }
+[data-theme="light"] .login-logo-dark,
+[data-theme="dark"]  .login-logo-light { display: none; }
 .login-card {
   width: 100%;
   background: var(--surface);

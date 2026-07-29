@@ -25,9 +25,10 @@
 
 <div class="login-wrap">
   <div class="login-outer">
-    {# Drop a logo at panel/static/logo.png to show it above the login box #}
+    {# Drop logos at panel/static/logo.png (light theme) and panel/static/logo-dark.png (dark theme) to show one above the login box #}
     <div class="login-logo-img">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="{{ network_name }}" onerror="this.parentElement.style.display='none'">
+      <img class="login-logo-light" src="{{ url_for('static', filename='logo.png') }}" alt="{{ network_name }}" onerror="this.style.display='none'">
+      <img class="login-logo-dark" src="{{ url_for('static', filename='logo-dark.png') }}" alt="{{ network_name }}" onerror="this.style.display='none'">
     </div>
     <div class="login-card">
       <div class="login-logo">
