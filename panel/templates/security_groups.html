@@ -130,13 +130,25 @@ function summaryText(sg) {
 // ── Load ─────────────────────────────────────────────────────────────────
 async function loadSg() {
   try {
-    const groups = await Panel.apiGet('/api/security-groups');
-    document.getElementById('sgCount').textContent = groups.length + ' group' + (groups.length !== 1 ? 's' : '');
+    const brief = await Panel.apiGet('/api/security-groups');
+    document.getElementById('sgCount').textContent = brief.length + ' group' + (brief.length !== 1 ? 's' : '');
+
+    if (!brief.length) { Panel.renderTable('sgTbody', [], 'No security groups'); return; }
+
+    // The list endpoint only returns name/priority/public (detail level 0).
+    // Fetch full detail per group so the table's Criteria column and the
+    // drawer both have the real inclusion/exclusion criteria — group counts
+    // are small (a handful to a few dozen), so N parallel requests is cheap.
+    const groups = await Promise.all(brief.map(async b => {
+      try {
+        return await Panel.apiGet('/api/security-groups/' + encodeURIComponent(b.name));
+      } catch (e) {
+        return b;   // fall back to the brief entry if detail fetch fails
+      }
+    }));
 
     sgMap = {};
     groups.forEach(sg => { sgMap[sg.name] = sg; });
-
-    if (!groups.length) { Panel.renderTable('sgTbody', [], 'No security groups'); return; }
 
     Panel.renderTable('sgTbody', groups.map(sg => {
       const name     = sg.name || '?';
@@ -164,14 +176,9 @@ async function loadSg() {
 }
 
 // ── Drawer ────────────────────────────────────────────────────────────────
-async function openDrawer(name) {
-  let sg = sgMap[name];
+function openDrawer(name) {
+  const sg = sgMap[name];
   if (!sg) return;
-
-  // List/get(0) omits detail — fetch full detail (level 1) for the drawer
-  try {
-    sg = await Panel.apiGet('/api/security-groups/' + encodeURIComponent(name));
-  } catch (e) { /* fall back to list-level data */ }
 
   document.getElementById('sgDrawerTitle').textContent = sg.name || name;
   document.getElementById('sgDrawerPriority').textContent = (typeof sg.priority === 'number') ? sg.priority : '—';
