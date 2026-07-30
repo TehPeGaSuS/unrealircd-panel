@@ -1,4 +1,4 @@
-<img width="1600" height="763" alt="Login-Light" src="https://github.com/user-attachments/assets/90a47f3f-262b-42d3-a2c3-772b1bd9fc65" />
+<img width="1600" height="760" alt="Login-Light" src="https://github.com/user-attachments/assets/4e345f08-bda6-4be8-9af4-e264a3f4a240" />
 
 ---
 
