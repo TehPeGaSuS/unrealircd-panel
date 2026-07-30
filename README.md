@@ -16,6 +16,12 @@ Flask backend, no frontend build step — drop in and run.
 
 ---
 
+## Screenshots
+
+- To see some screenshots, click [here](https://github.com/TehPeGaSuS/unrealircd-panel/blob/main/Screenshots/Screenshots.md)
+
+---
+
 ## Directory layout
 
 ```
