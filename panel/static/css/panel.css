@@ -735,8 +735,8 @@ body.login-page {
   text-align: center;
 }
 .login-logo-img img {
-  max-width: 320px;
-  max-height: 70px;
+  max-width: 300px;
+  max-height: 90px;
   width: auto;
   height: auto;
   object-fit: contain;
