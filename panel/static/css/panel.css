@@ -238,8 +238,8 @@ body {
 .theme-icon-light::after { content: " Light"; font-size: 12px; }
 .theme-icon-dark::after  { content: " Dark";  font-size: 12px; }
 
-[data-theme="light"] .theme-icon-dark,
-[data-theme="dark"]  .theme-icon-light { display: none; }
+[data-theme="light"] .theme-icon-light,
+[data-theme="dark"]  .theme-icon-dark { display: none; }
 
 .btn-logout {
   background: none;
