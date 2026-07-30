@@ -1,4 +1,3 @@
-### Some screenshots, dark theme
 <img width="1600" height="761" alt="Login-Dark" src="https://github.com/user-attachments/assets/da9cd404-0979-4d5d-9ec6-2146b9bd1e5a" />
 
 ---
