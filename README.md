@@ -18,7 +18,9 @@ Flask backend, no frontend build step — drop in and run.
 
 ## Screenshots
 
-- To see some screenshots, click [here](https://github.com/TehPeGaSuS/unrealircd-panel/blob/main/Screenshots/Screenshots.md)
+You can see some screenshots, by clicking thee links below:
+- [Dark theme](https://github.com/TehPeGaSuS/unrealircd-panel/blob/main/Screenshots/Dark%20Theme.md)
+- [Light theme]() - TBD
 
 ---
 
