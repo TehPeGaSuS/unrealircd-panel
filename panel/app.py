@@ -2,7 +2,7 @@
 UnrealIRCd Admin Panel — app.py
 """
 
-import os, re, sys, json, threading, time, logging, hashlib, hmac, secrets
+import os, re, sys, json, threading, time, logging, hashlib, hmac, secrets, unicodedata
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -160,14 +160,21 @@ def get_rpc():
 
 # UnrealIRCd only accepts an issuer that is a valid nickname. Panel users are
 # shown as "<username>[web]" so actions from the panel are recognisable in
-# "set by" fields and logs. Characters not allowed in nicks become "-", a
+# "set by" fields and logs. Accents are removed (joão -> joao), other
+# characters not allowed in nicks become "-", a
 # leading digit or "-" (not allowed first) gets a "_" in front, and the
 # whole name stays within the default NICKLEN of 30.
 _NICK_INVALID = re.compile(r"[^A-Za-z0-9\[\]\\`_^{|}-]")
 ISSUER_SUFFIX = "[web]"
+# Letters that are not "letter + accent" in Unicode, so NFKD can't reduce them
+_TRANSLIT = str.maketrans({"ß": "ss", "æ": "ae", "Æ": "AE", "ø": "o", "Ø": "O", "œ": "oe",
+                           "Œ": "OE", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "þ": "th", "Þ": "TH"})
 
 def panel_issuer(username):
-    base = _NICK_INVALID.sub("-", username or "webpanel")
+    # Split letters from their accents (NFKD) and drop the accent marks
+    plain = "".join(ch for ch in unicodedata.normalize("NFKD", (username or "webpanel").translate(_TRANSLIT))
+                    if not unicodedata.combining(ch))
+    base = _NICK_INVALID.sub("-", plain)
     if base[0].isdigit() or base[0] == "-":
         base = "_" + base
     return base[:30 - len(ISSUER_SUFFIX)] + ISSUER_SUFFIX
