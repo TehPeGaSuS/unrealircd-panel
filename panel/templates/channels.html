@@ -120,7 +120,7 @@ async function loadChans() {
         + '<td class="td-main td-mono">' + safeN + '</td>'
         + '<td class="td-mono">' + (c.num_users ?? 0) + '</td>'
         + '<td class="td-mono text-muted">' + (Panel.esc(modes) || '—') + '</td>'
-        + '<td class="text-muted truncate" style="max-width:220px">' + (Panel.esc(topicClean) || '—') + '</td>'
+        + '<td class="text-muted truncate" style="max-width:220px" title="' + Panel.esc(topicClean) + '">' + (Panel.ircToHtml(topic) || '—') + '</td>'
         + '<td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" onclick="openChanDrawer(' + Panel.jsArg(c.name) + ')">details</button></td>'
         + '</tr>';
     }));
@@ -158,7 +158,7 @@ async function openChanDrawer(chan) {
     const c = await Panel.apiGet('/api/channels/' + encodeURIComponent(name) + '/detail');
 
     const topic = c.topic?.value || c.topic || '';
-    document.getElementById('drawerTopic').textContent = Panel.stripIrc(topic) || '(no topic)';
+    document.getElementById('drawerTopic').innerHTML = Panel.ircToHtml(topic) || '(no topic)';
     const topicBy = c.topic?.set_by || '';
     const topicAt = c.topic?.set_at ? Panel.fmtDate(c.topic.set_at) : '';
     document.getElementById('drawerTopicMeta').textContent =
@@ -215,7 +215,7 @@ async function doSetTopic() {
   try {
     await Panel.apiPost('/api/channels/' + encodeURIComponent(name) + '/topic', { topic });
     Panel.toast('Topic set', 'ok');
-    document.getElementById('drawerTopic').textContent = Panel.stripIrc(topic) || '(no topic)';
+    document.getElementById('drawerTopic').innerHTML = Panel.ircToHtml(topic) || '(no topic)';
     loadChans();
   } catch(e) { Panel.toast(e.message, 'error'); }
 }

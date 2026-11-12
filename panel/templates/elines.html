@@ -170,7 +170,7 @@ async function loadElines() {
       const expireTs = e.expire_at ? new Date(e.expire_at).getTime() : 9999999999999;
       const isSoft   = mask.startsWith('%');
 
-      return `<tr data-search="${Panel.esc(mask)} ${Panel.esc(typesToString(types))} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
+      return `<tr data-search="${Panel.esc(mask)} ${Panel.esc(typesToString(types))} ${Panel.esc(Panel.stripIrc(reason))} ${Panel.esc(setBy)}"
                   data-sort0="${Panel.esc(mask.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${expireTs}"
                   style="cursor:pointer" onclick="openElineDrawer(${i})">
         <td class="td-mono td-main">
@@ -179,7 +179,7 @@ async function loadElines() {
         </td>
         <td style="white-space:normal;line-height:1.9">${typesToTags(types)}</td>
         <td class="text-muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-            title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
+            title="${Panel.esc(Panel.stripIrc(reason))}">${Panel.ircToHtml(reason)}</td>
         <td class="td-mono text-muted" style="white-space:nowrap">${Panel.esc(expires)}</td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap">
           ${CAN_DEL && e.set_in_config ? Panel.CONFIG_BADGE : ''}
@@ -221,7 +221,7 @@ function openElineDrawer(i) {
     ['expires',  e.expire_at ? when(e.expire_at) : 'never (permanent)'],
     ['duration', e.duration_string],
   ]);
-  document.getElementById('elineDrawerReason').textContent = e.reason || '—';
+  document.getElementById('elineDrawerReason').innerHTML = Panel.ircToHtml(e.reason) || '—';
   setFooter('elineDrawerFooter', e,
     CAN_DEL ? `<button class="btn btn-danger" onclick="deleteEline(${Panel.jsArg(mask)},true)">Remove</button>` : '');
   Panel.openDrawer('elineDrawer');

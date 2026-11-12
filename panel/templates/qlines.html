@@ -115,12 +115,12 @@ async function loadQlines() {
       const setAtTs  = q.set_at ? new Date(q.set_at).getTime() : 0;
       const expireTs = q.expire_at ? new Date(q.expire_at).getTime() : 9999999999999;
 
-      return `<tr data-search="${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
+      return `<tr data-search="${Panel.esc(name)} ${Panel.esc(Panel.stripIrc(reason))} ${Panel.esc(setBy)}"
                   data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${expireTs}"
                   style="cursor:pointer" onclick="openQlineDrawer(${i})">
         <td class="td-mono td-main">${Panel.esc(name)}</td>
         <td class="text-muted" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-            title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
+            title="${Panel.esc(Panel.stripIrc(reason))}">${Panel.ircToHtml(reason)}</td>
         <td class="td-mono text-muted" style="white-space:nowrap">${Panel.esc(expires)}</td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap">
           ${CAN_DEL && q.set_in_config ? Panel.CONFIG_BADGE : ''}
@@ -162,7 +162,7 @@ function openQlineDrawer(i) {
     ['hits',      q.hits],
     ['last hit',  q.last_hit_at ? when(q.last_hit_at) : (typeof q.hits === 'number' ? 'never' : null)],
   ]);
-  document.getElementById('qlineDrawerReason').textContent = q.reason || '—';
+  document.getElementById('qlineDrawerReason').innerHTML = Panel.ircToHtml(q.reason) || '—';
   setFooter('qlineDrawerFooter', q,
     CAN_DEL ? `<button class="btn btn-danger" onclick="deleteQline(${Panel.jsArg(name)},true)">Remove</button>` : '');
   Panel.openDrawer('qlineDrawer');

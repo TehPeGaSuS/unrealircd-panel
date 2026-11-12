@@ -93,7 +93,7 @@ function openSrvDrawer(i) {
   document.getElementById('srvDrawerGrid').innerHTML = Panel.detailRows([
     ['name',        s.name],
     ['sid',         s.id],
-    ['description', srv.info, {prose: true}],
+    ['description', srv.info, {prose: true, irc: true}],
     ['software',    f.software],
     ['protocol',    f.protocol],
     ['users',       srv.num_users],

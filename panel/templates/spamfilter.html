@@ -285,7 +285,7 @@ async function loadSf() {
       const lastHitTs = sf.last_hit_at ? new Date(sf.last_hit_at).getTime() : 0;
       const badge    = ACTION_BADGES[action.toLowerCase()] || 'badge-muted';
 
-      return `<tr data-search="${Panel.esc(pattern)} ${Panel.esc(targets)} ${Panel.esc(action)} ${Panel.esc(reason)} ${Panel.esc(setBy)} ${Panel.esc(sf.id || "")}"
+      return `<tr data-search="${Panel.esc(pattern)} ${Panel.esc(targets)} ${Panel.esc(action)} ${Panel.esc(Panel.stripIrc(reason))} ${Panel.esc(setBy)} ${Panel.esc(sf.id || "")}"
                   data-sort0="${Panel.esc(pattern.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${hitsTs}" data-sort3="${lastHitTs}"
                   style="cursor:pointer" onclick="openDrawer(${Panel.jsArg(key)})">
         <td class="td-main td-mono" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
@@ -295,7 +295,7 @@ async function loadSf() {
             class="text-muted" title="${Panel.esc(targets)}">${Panel.esc(targets)}</td>
         <td><span class="badge ${badge}">${Panel.esc(action)}</span></td>
         <td class="text-muted" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-            title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
+            title="${Panel.esc(Panel.stripIrc(reason))}">${Panel.ircToHtml(reason)}</td>
         <td class="td-mono text-muted">${Panel.esc(setBy)}</td>
         <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
         <td class="td-mono text-muted">${hits}</td>
@@ -345,7 +345,7 @@ function openDrawer(key) {
   document.getElementById('sfDrawerSetAt').textContent = sf.set_at ? Panel.fmtDate(sf.set_at) : '—';
   document.getElementById('sfDrawerHits').textContent = sf.hits ?? '—';
   document.getElementById('sfDrawerLastHit').textContent = sf.last_hit_at ? Panel.fmtDate(sf.last_hit_at) : '—';
-  document.getElementById('sfDrawerReason').textContent = sf.reason || '—';
+  document.getElementById('sfDrawerReason').innerHTML = Panel.ircToHtml(sf.reason) || '—';
   showOptional('sfDrawerIdWrap', 'sfDrawerId', sf.id);
   showOptional('sfDrawerRuleWrap', 'sfDrawerRule', sf.rule);
   // spamfilter::except is a security group (6.2.8+ shows it under "except")

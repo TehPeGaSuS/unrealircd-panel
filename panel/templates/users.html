@@ -240,7 +240,7 @@ async function openUserDrawer(nick) {
       ['Idle',       u.idle ? Panel.fmtDuration(u.idle) : '—'],
     ];
     document.getElementById('userDetailGrid').innerHTML = rows
-      .map(function(r){ return '<span class="detail-key">' + r[0] + '</span><span class="detail-val">' + Panel.esc(String(r[1])) + '</span>'; })
+      .map(function(r){ return '<span class="detail-key">' + r[0] + '</span><span class="detail-val">' + (r[0] === 'Realname' ? Panel.ircToHtml(String(r[1])) : Panel.esc(String(r[1]))) + '</span>'; })
       .join('');
     const chans = u.channels || [];
     document.getElementById('userChannels').textContent = chans.length ? chans.join('  ') : '—';

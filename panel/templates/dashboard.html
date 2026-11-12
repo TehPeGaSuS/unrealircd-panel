@@ -148,7 +148,7 @@ async function loadDashChans() {
       return `<tr>
         <td class="td-main td-mono">${Panel.esc(c.name)}</td>
         <td class="td-mono">${c.num_users ?? 0}</td>
-        <td class="text-muted truncate" style="max-width:300px">${Panel.esc(topic) || '<span class="text-muted">—</span>'}</td>
+        <td class="text-muted truncate" style="max-width:300px" title="${Panel.esc(Panel.stripIrc(topic))}">${Panel.ircToHtml(topic) || '<span class="text-muted">—</span>'}</td>
       </tr>`;
     }));
   } catch(e) {

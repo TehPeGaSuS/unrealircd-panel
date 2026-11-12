@@ -220,12 +220,12 @@ async function loadBans() {
         : '';
       const actions = `${CAN_DEL && b.set_in_config ? Panel.CONFIG_BADGE : ''}
         ${CAN_DEL && !b.set_in_config ? `<button class="btn btn-danger btn-sm" onclick="delBan(${Panel.jsArg(name)},${Panel.jsArg(type)})">remove</button>` : ''}`;
-      return `<tr data-search="${Panel.esc(type)} ${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)} ${Panel.esc(banId)} ${Panel.esc(source)} ${Panel.esc(b.spamfilter_id || '')}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${expireTs}" data-sort2="${setAtTs}" data-sort3="${hitsTs}" data-sort4="${lastHitTs}"
+      return `<tr data-search="${Panel.esc(type)} ${Panel.esc(name)} ${Panel.esc(Panel.stripIrc(reason))} ${Panel.esc(setBy)} ${Panel.esc(banId)} ${Panel.esc(source)} ${Panel.esc(b.spamfilter_id || '')}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${expireTs}" data-sort2="${setAtTs}" data-sort3="${hitsTs}" data-sort4="${lastHitTs}"
                   style="cursor:pointer" onclick="openBanDrawer(${Panel.jsArg(key)})">
         ${cbCol}
         <td><span class="badge ${badge}">${Panel.esc(type.toUpperCase())}</span></td>
         <td class="td-mono td-main">${Panel.esc(name)}${sourceBadge}</td>
-        <td class="text-muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
+        <td class="text-muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Panel.esc(Panel.stripIrc(reason))}">${Panel.ircToHtml(reason)}</td>
         <td class="td-mono text-muted" style="white-space:nowrap">${Panel.esc(expires)}</td>
         <td class="td-mono text-muted">${hits}</td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap">${actions}</td>
@@ -275,7 +275,7 @@ function openBanDrawer(key) {
     ['hits',       b.hits],
     ['last hit',   b.last_hit_at ? when(b.last_hit_at) : (typeof b.hits === 'number' ? 'never' : null)],
   ]);
-  document.getElementById('banDrawerReason').textContent = b.reason || '—';
+  document.getElementById('banDrawerReason').innerHTML = Panel.ircToHtml(b.reason) || '—';
   const name = b.name || '';
   document.getElementById('banDrawerFooter').innerHTML = b.set_in_config
     ? `${Panel.CONFIG_BADGE} <span class="text-muted" style="font-size:12px">Set in the configuration file; remove it there and rehash.</span>`

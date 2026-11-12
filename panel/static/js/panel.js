@@ -313,13 +313,14 @@ function jsArg(value) {
 
 // Rows for a details drawer (.detail-grid): [[label, value, opts], ...].
 // Rows whose value is null/undefined/'' are skipped. Values are escaped unless
-// opts.html; opts.prose shows wrapping sans-serif text (reasons, descriptions).
+// opts.html; opts.irc renders IRC colours/bold; opts.prose shows wrapping
+// sans-serif text (reasons, descriptions).
 function detailRows(rows) {
   return rows
     .filter(r => r && r[1] !== undefined && r[1] !== null && r[1] !== '')
     .map(([key, value, opts = {}]) =>
       `<span class="detail-key">${esc(key)}</span>` +
-      `<span class="detail-val${opts.prose ? ' prose' : ''}">${opts.html ? value : esc(value)}</span>`)
+      `<span class="detail-val${opts.prose ? ' prose' : ''}">${opts.html ? value : opts.irc ? ircToHtml(value) : esc(value)}</span>`)
     .join('');
 }
 
@@ -332,13 +333,87 @@ function fmtRelative(ts) {
   return secs >= 0 ? 'in ' + d : d + ' ago';
 }
 
-// Strip mIRC/IRC formatting codes before display
-//  bold,  color (+ optional NN,NN),  reset,
-//  monospace,  reverse,  italic,  strikethrough,  underline
+// ── IRC formatting (mIRC codes) ─────────────────────────────────────────
+// \x02 bold, \x1D italic, \x1F underline, \x1E strikethrough, \x11 monospace,
+// \x16 reverse, \x0F reset, \x03NN[,NN] colour, \x04RRGGBB[,RRGGBB] hex colour.
+const IRC_PALETTE = (
+  'FFFFFF 000000 00007F 009300 FF0000 7F0000 9C009C FC7F00 FFFF00 00FC00 009393 00FFFF 0000FC FF00FF 7F7F7F D2D2D2 ' +
+  '470000 472100 474700 324700 004700 00472C 004747 002747 000047 2E0047 470047 47002A ' +
+  '740000 743A00 747400 517400 007400 007449 007474 004074 000074 4B0074 740074 740045 ' +
+  'B50000 B56300 B5B500 7DB500 00B500 00B571 00B5B5 0063B5 0000B5 7500B5 B500B5 B5006B ' +
+  'FF0000 FF8C00 FFFF00 B2FF00 00FF00 00FFA0 00FFFF 008CFF 0000FF A500FF FF00FF FF0098 ' +
+  'FF5959 FFB459 FFFF71 CFFF60 6FFF6F 65FFC9 6DFFFF 59B4FF 5959FF C459FF FF66FF FF59BC ' +
+  'FF9C9C FFD39C FFFF9C E2FF9C 9CFF9C 9CFFDB 9CFFFF 9CD3FF 9C9CFF DC9CFF FF9CFF FF94D3 ' +
+  '000000 131313 282828 363636 4D4D4D 656565 818181 9F9F9F BCBCBC E2E2E2 FFFFFF'
+).split(' ').map(h => '#' + h);   // 0-98; 99 means "default colour"
+
+const IRC_COLOR_RE = /^\x03(?:(\d{1,2})(?:,(\d{1,2}))?)?/;
+const IRC_HEX_RE   = /^\x04(?:([0-9a-fA-F]{6})(?:,([0-9a-fA-F]{6}))?)?/;
+
+function ircColor(n) {
+  if (n === undefined) return undefined;
+  const i = parseInt(n, 10);
+  return i >= 0 && i < IRC_PALETTE.length ? IRC_PALETTE[i] : null;  // null = default
+}
+
+// Plain text with all formatting codes removed (titles, search, dialogs)
 function stripIrc(str) {
   return String(str ?? '')
-    .replace(/\d{1,2}(?:,\d{1,2})?/g, '') // color codes with args
-    .replace(/[]/g, ''); // remaining control chars
+    .replace(/\x03(\d{1,2}(,\d{1,2})?)?/g, '')
+    .replace(/\x04([0-9a-fA-F]{6}(,[0-9a-fA-F]{6})?)?/g, '')
+    .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
+}
+
+// Escaped HTML with the formatting rendered as <span> styles
+function ircToHtml(str) {
+  const s = String(str ?? '');
+  const st = { b: false, i: false, u: false, x: false, m: false, r: false, fg: null, bg: null };
+  let out = '', run = '';
+  const flush = () => {
+    if (!run) return;
+    let fg = st.fg, bg = st.bg;
+    if (st.r) { [fg, bg] = [bg || 'var(--surface)', fg || 'var(--text)']; }
+    const css = [];
+    if (st.b) css.push('font-weight:600');
+    if (st.i) css.push('font-style:italic');
+    const deco = [st.u && 'underline', st.x && 'line-through'].filter(Boolean);
+    if (deco.length) css.push('text-decoration:' + deco.join(' '));
+    if (st.m) css.push("font-family:'IBM Plex Mono',monospace");
+    if (fg) css.push('color:' + fg);
+    if (bg) css.push('background:' + bg + ';border-radius:2px');
+    out += css.length ? `<span style="${css.join(';')}">${esc(run)}</span>` : esc(run);
+    run = '';
+  };
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    const code = c.charCodeAt(0);
+    if (code >= 0x20 && code !== 0x7F) { run += c; continue; }
+    flush();
+    switch (c) {
+      case '\x02': st.b = !st.b; break;
+      case '\x1D': st.i = !st.i; break;
+      case '\x1F': st.u = !st.u; break;
+      case '\x1E': st.x = !st.x; break;
+      case '\x11': st.m = !st.m; break;
+      case '\x16': st.r = !st.r; break;
+      case '\x0F': Object.assign(st, { b: false, i: false, u: false, x: false, m: false, r: false, fg: null, bg: null }); break;
+      case '\x03': {
+        const m = s.slice(i).match(IRC_COLOR_RE);
+        if (m[1] === undefined) { st.fg = st.bg = null; }            // bare \x03 resets colours
+        else { st.fg = ircColor(m[1]); if (m[2] !== undefined) st.bg = ircColor(m[2]); }
+        i += m[0].length - 1; break;
+      }
+      case '\x04': {
+        const m = s.slice(i).match(IRC_HEX_RE);
+        if (m[1] === undefined) { st.fg = st.bg = null; }
+        else { st.fg = '#' + m[1]; if (m[2] !== undefined) st.bg = '#' + m[2]; }
+        i += m[0].length - 1; break;
+      }
+      default: break;   // other control characters are dropped
+    }
+  }
+  flush();
+  return out;
 }
 
 // ============================================================
@@ -361,7 +436,7 @@ window.Panel = {
   api, apiGet, apiPost, apiDelete,
   toast, openModal, closeModal,
   renderTable, tableLoadingState, tableErrorState, initTableSearch, initSortableTable,
-  confirm, fmtTime, fmtDate, fmtDuration, fmtRelative, detailRows, esc, jsArg, stripIrc, CONFIG_BADGE,
+  confirm, fmtTime, fmtDate, fmtDuration, fmtRelative, detailRows, esc, jsArg, stripIrc, ircToHtml, CONFIG_BADGE,
 };
 
 // ============================================================
