@@ -2,7 +2,7 @@
 UnrealIRCd Admin Panel — app.py
 """
 
-import os, sys, json, threading, time, logging, hashlib, hmac, secrets
+import os, re, sys, json, threading, time, logging, hashlib, hmac, secrets
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -158,12 +158,26 @@ def get_rpc():
             log.warning("RPC not available: %s", exc)
     return _rpc
 
+# UnrealIRCd only accepts an issuer that is a valid nickname. Panel users are
+# shown as "<username>[web]" so actions from the panel are recognisable in
+# "set by" fields and logs. Characters not allowed in nicks become "-", a
+# leading digit or "-" (not allowed first) gets a "_" in front, and the
+# whole name stays within the default NICKLEN of 30.
+_NICK_INVALID = re.compile(r"[^A-Za-z0-9\[\]\\`_^{|}-]")
+ISSUER_SUFFIX = "[web]"
+
+def panel_issuer(username):
+    base = _NICK_INVALID.sub("-", username or "webpanel")
+    if base[0].isdigit() or base[0] == "-":
+        base = "_" + base
+    return base[:30 - len(ISSUER_SUFFIX)] + ISSUER_SUFFIX
+
 def rpc_call(fn):
     mgr = get_rpc()
     if mgr is None:
         return None, "Not connected to UnrealIRCd"
     # Every call carries the panel user, so UnrealIRCd logs show who did it
-    issuer = session.get("username") if session.get("logged_in") else None
+    issuer = panel_issuer(session.get("username")) if session.get("logged_in") else None
     try:
         return mgr.with_retry(fn, issuer=issuer), None
     except Exception as exc:
@@ -385,7 +399,6 @@ def api_users_geo():
             name = getattr(geo, "country_name", "")
 
         # Check for local/private IPs
-        import re
         is_local = bool(
             not ip or ip in ("::1","localhost") or
             re.match(r"^127\.", ip) or re.match(r"^10\.", ip) or

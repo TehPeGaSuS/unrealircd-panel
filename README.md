@@ -13,6 +13,7 @@ Flask backend, no frontend build step — drop in and run.
 - Live log streaming via SSE (Server-Sent Events)
 - Responsive — works on desktop and mobile
 - Light/dark theme toggle, preference stored in browser
+- Actions are attributed to the panel user as `<username>[web]` (in "set by" fields and UnrealIRCd's logs), so you can tell them apart from actions done on IRC
 - Fully self-contained: fonts, the map library, country shapes and flags are bundled, so the panel makes no external requests and needs no API keys
 
 ---

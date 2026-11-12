@@ -331,7 +331,9 @@ class Manager:
         with client.call_lock:
             conn = client.conn
             if issuer and conn.current_issuer != issuer:
-                conn.query("rpc.set_issuer", {"name": issuer}, no_wait=True)
+                # Wait for the reply: if the server refused the name, carrying
+                # on would attribute this call to the previous issuer.
+                conn.query("rpc.set_issuer", {"name": issuer})
                 conn.current_issuer = issuer
             return fn(conn)
 
