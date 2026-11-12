@@ -2,7 +2,7 @@
 UnrealIRCd Admin Panel — app.py
 """
 
-import os, re, sys, json, threading, time, logging, hashlib, hmac, secrets, unicodedata
+import os, re, sys, json, threading, time, logging, hashlib, hmac, secrets
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -158,26 +158,38 @@ def get_rpc():
             log.warning("RPC not available: %s", exc)
     return _rpc
 
-# UnrealIRCd only accepts an issuer that is a valid nickname. Panel users are
-# shown as "<username>[web]" so actions from the panel are recognisable in
-# "set by" fields and logs. Accents are removed (joão -> joao), other
-# characters not allowed in nicks become "-", a
-# leading digit or "-" (not allowed first) gets a "_" in front, and the
-# whole name stays within the default NICKLEN of 30.
-_NICK_INVALID = re.compile(r"[^A-Za-z0-9\[\]\\`_^{|}-]")
+# Panel actions are attributed in UnrealIRCd as "<username>[web]" (the RPC
+# issuer), so they can be told apart from actions done on IRC in "set by"
+# fields and logs. UnrealIRCd only accepts an issuer that is a valid nickname,
+# so panel usernames must be valid nicks too: UnrealIRCd's basic nick
+# characters a-z A-Z 0-9 [ \ ] ^ _ - { | } `, not starting with a digit or
+# "-", and at most 25 characters so "<username>[web]" fits in NICKLEN 30.
 ISSUER_SUFFIX = "[web]"
-# Letters that are not "letter + accent" in Unicode, so NFKD can't reduce them
-_TRANSLIT = str.maketrans({"ß": "ss", "æ": "ae", "Æ": "AE", "ø": "o", "Ø": "O", "œ": "oe",
-                           "Œ": "OE", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "þ": "th", "Þ": "TH"})
+USERNAME_MAX = 30 - len(ISSUER_SUFFIX)
+_VALID_USERNAME = re.compile(r"[A-Za-z\[\]\\^_{|}`][A-Za-z0-9\[\]\\^_{|}`-]{0,%d}" % (USERNAME_MAX - 1))
+
+def username_error(username):
+    if not username:
+        return "Username required"
+    if len(username) > USERNAME_MAX:
+        return f"Username can be at most {USERNAME_MAX} characters"
+    if username[0].isdigit() or username[0] == "-":
+        return "Username cannot start with a digit or '-'"
+    if not _VALID_USERNAME.fullmatch(username):
+        return "Username can only use a-z A-Z 0-9 [ \\ ] ^ _ - { | } ` (like IRC nicknames)"
+    return None
 
 def panel_issuer(username):
-    # Split letters from their accents (NFKD) and drop the accent marks
-    plain = "".join(ch for ch in unicodedata.normalize("NFKD", (username or "webpanel").translate(_TRANSLIT))
-                    if not unicodedata.combining(ch))
-    base = _NICK_INVALID.sub("-", plain)
-    if base[0].isdigit() or base[0] == "-":
-        base = "_" + base
-    return base[:30 - len(ISSUER_SUFFIX)] + ISSUER_SUFFIX
+    return username + ISSUER_SUFFIX
+
+# PANEL_USER comes from .env, so check it here; under gunicorn the check in
+# __main__ below never runs.
+if (_err := username_error(PANEL_USER)):
+    sys.exit(f"ERROR: PANEL_USER {PANEL_USER!r} in .env is not a valid panel username: {_err}")
+for _u in _load_extra_users():
+    if (_err := username_error(_u.get("username", ""))):
+        log.warning("Panel user %r is not a valid username (%s): UnrealIRCd will refuse "
+                    "its actions. Delete it and create it again with a valid name.", _u.get("username"), _err)
 
 def rpc_call(fn):
     mgr = get_rpc()
@@ -880,6 +892,8 @@ def api_settings_users_add():
 
     if not username or not password:
         return jsonify({"error": "username and password required"}), 400
+    if (err := username_error(username)):
+        return jsonify({"error": err}), 400
     if len(password) < 8:
         return jsonify({"error": "Password must be at least 8 characters"}), 400
     if username == PANEL_USER:

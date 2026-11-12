@@ -123,7 +123,11 @@
     <div class="modal-body">
       <div class="form-group">
         <label class="form-label">Username</label>
-        <input class="form-input" id="modalUsername" type="text" autocomplete="off">
+        <input class="form-input" id="modalUsername" type="text" autocomplete="off" maxlength="25">
+        <div class="text-muted" id="modalUsernameHint" style="font-size:11px;margin-top:4px">
+          Like an IRC nickname: a-z A-Z 0-9 [ \ ] ^ _ - { | } `, not starting with a digit or -, max 25.
+          Actions show on IRC as <span class="td-mono">username[web]</span>.
+        </div>
       </div>
       <div class="form-group" id="modalPasswordGroup">
         <label class="form-label">Password</label>
@@ -298,6 +302,7 @@ async function openAddUser() {
   document.getElementById('userModalSaveBtn').textContent = 'Add User';
   document.getElementById('modalUsername').value = '';
   document.getElementById('modalUsername').disabled = false;
+  document.getElementById('modalUsernameHint').style.display = '';
   document.getElementById('modalPassword').value = '';
   document.getElementById('modalPasswordGroup').style.display = '';
   document.getElementById('modalEditPwHint').style.display = 'none';
@@ -316,6 +321,7 @@ async function openEditUser(u) {
   document.getElementById('userModalSaveBtn').textContent = 'Save Changes';
   document.getElementById('modalUsername').value = u.username;
   document.getElementById('modalUsername').disabled = true;
+  document.getElementById('modalUsernameHint').style.display = 'none';
   document.getElementById('modalPassword').value = '';
   document.getElementById('modalPasswordGroup').style.display = '';
   document.getElementById('modalEditPwHint').style.display = '';
@@ -334,6 +340,9 @@ document.getElementById('userModalSaveBtn')?.addEventListener('click', async () 
 
   if (userModalMode === 'add') {
     if (!username || !password) { Panel.toast('Fill in all fields', 'error'); return; }
+    if (!/^[A-Za-z\[\]\\^_{|}`][A-Za-z0-9\[\]\\^_{|}`-]{0,24}$/.test(username)) {
+      Panel.toast('Invalid username: use IRC nickname characters, see the hint', 'error'); return;
+    }
     try {
       await Panel.apiPost('/api/settings/users', { username, password, role, permissions: perms });
       Panel.toast('User added', 'ok');
