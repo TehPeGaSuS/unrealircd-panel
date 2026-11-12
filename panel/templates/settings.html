@@ -283,7 +283,7 @@ async function loadPanelUsers() {
         <td class="td-mono text-muted" style="font-size:11px;white-space:nowrap">${u.last_login ? (() => { const d = new Date(u.last_login); return d.toLocaleDateString([], {month:'short',day:'numeric',year:'numeric'}) + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); })() : '<span style="color:var(--text-3)">never</span>'}</td>
         <td>${!isEnv ? `<div class="flex gap-8">
           <button class="btn btn-ghost btn-sm" data-edit-user="${Panel.esc(u.username)}">edit</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteUser('${Panel.esc(u.username)}')">remove</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteUser(${Panel.jsArg(u.username)})">remove</button>
         </div>` : ''}</td>
       </tr>`;
     }), 'No panel users');
@@ -378,8 +378,8 @@ async function loadRpcServers() {
       <td class="td-mono text-muted">${s.port}</td>
       <td><span class="badge ${s.active?'badge-green':'badge-muted'}">${s.active?'active':'idle'}</span></td>
       <td><div class="flex gap-8">
-        ${!s.active ? `<button class="btn btn-ghost btn-sm" onclick="activateRpc('${Panel.esc(s.name)}')">activate</button>` : ''}
-        <button class="btn btn-danger btn-sm" onclick="deleteRpc('${Panel.esc(s.name)}')">remove</button>
+        ${!s.active ? `<button class="btn btn-ghost btn-sm" onclick="activateRpc(${Panel.jsArg(s.name)})">activate</button>` : ''}
+        <button class="btn btn-danger btn-sm" onclick="deleteRpc(${Panel.jsArg(s.name)})">remove</button>
       </div></td>
     </tr>`), 'No RPC servers configured');
   } catch(e) { Panel.tableErrorState('rpcServersTbody', e.message); }

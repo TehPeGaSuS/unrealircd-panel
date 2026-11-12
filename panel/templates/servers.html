@@ -48,7 +48,7 @@ async function loadServers() {
         + '<td class="td-mono">' + users + '</td>'
         + '<td class="td-mono text-muted">' + Panel.esc(version) + '</td>'
         + '<td class="td-mono text-muted">' + Panel.esc(uplink) + '</td>'
-        + '<td><button class="btn btn-ghost btn-sm" onclick="doRehash(\'' + Panel.esc(name) + '\')">rehash</button></td>'
+        + '<td><button class="btn btn-ghost btn-sm" onclick="doRehash(' + Panel.jsArg(name) + ')">rehash</button></td>'
         + '</tr>';
     }));
     Panel.initSortableTable('srvTbody');

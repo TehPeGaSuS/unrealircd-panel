@@ -64,11 +64,24 @@ class RPCError(Exception):
 
 
 class ConnectionError(Exception):
-    """Raised when the WebSocket transport fails."""
+    """Raised when the WebSocket transport fails.
+
+    `sent` tells whether the request may have reached the server: False
+    means it certainly did not (safe to retry anything), True means it may
+    have been executed already. `method` is the RPC method, when known.
+    """
+    def __init__(self, message: str = "", sent: bool = True, method: Optional[str] = None):
+        super().__init__(message)
+        self.sent = sent
+        self.method = method
 
 
 class TimeoutError(Exception):
-    """Raised when a query times out waiting for a response."""
+    """Raised when a query times out waiting for a response (it was sent)."""
+    def __init__(self, message: str = "", method: Optional[str] = None):
+        super().__init__(message)
+        self.sent = True
+        self.method = method
 
 
 class Connection:
@@ -101,6 +114,8 @@ class Connection:
         self.issuer = issuer
         self._ws: Optional[websocket.WebSocket] = None
         self._lock = threading.Lock()
+        # Issuer the server currently has for this connection (rpc.set_issuer)
+        self.current_issuer: Optional[str] = None
         self._connect()
 
     # ------------------------------------------------------------------
@@ -129,6 +144,7 @@ class Connection:
             # Fire-and-forget; don't wait for the reply — it's async and
             # waiting here would block before we're ready to receive.
             self._send_raw("rpc.set_issuer", {"name": self.issuer}, no_wait=True)
+            self.current_issuer = self.issuer
 
     def _send_raw(
         self,
@@ -189,7 +205,7 @@ class Connection:
             try:
                 self._send_raw(method, params, no_wait=no_wait, req_id=req_id)
             except Exception as exc:
-                raise ConnectionError(str(exc)) from exc
+                raise ConnectionError(str(exc), sent=False, method=method) from exc
 
             if no_wait:
                 return True
@@ -198,20 +214,20 @@ class Connection:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise TimeoutError(f"Query '{method}' timed out after {self.timeout}s")
+                    raise TimeoutError(f"Query '{method}' timed out after {self.timeout}s", method=method)
 
                 try:
                     self._ws.settimeout(min(remaining, self.timeout))
                     raw = self._ws.recv()
                 except websocket.WebSocketTimeoutException:
-                    raise TimeoutError(f"Query '{method}' timed out")
+                    raise TimeoutError(f"Query '{method}' timed out", method=method)
                 except Exception as exc:
-                    raise ConnectionError(str(exc)) from exc
+                    raise ConnectionError(str(exc), method=method) from exc
 
                 try:
                     reply = json.loads(raw)
                 except json.JSONDecodeError as exc:
-                    raise ConnectionError(f"Invalid JSON from server: {exc}") from exc
+                    raise ConnectionError(f"Invalid JSON from server: {exc}", method=method) from exc
 
                 reply_id = reply.get("id")
 
@@ -229,7 +245,7 @@ class Connection:
                     err = reply["error"]
                     raise RPCError(err.get("code", -1), err.get("message", "unknown"))
 
-                raise ConnectionError(f"Unexpected JSON-RPC response: {reply}")
+                raise ConnectionError(f"Unexpected JSON-RPC response: {reply}", method=method)
 
     def event_loop_recv(self, timeout: float = 2.0) -> Optional[Any]:
         """
@@ -312,3 +328,11 @@ class Connection:
     def rpc(self):
         from .namespaces import Rpc
         return Rpc(self)
+
+    def whowas(self):
+        from .namespaces import Whowas
+        return Whowas(self)
+
+    def connthrottle(self):
+        from .namespaces import Connthrottle
+        return Connthrottle(self)

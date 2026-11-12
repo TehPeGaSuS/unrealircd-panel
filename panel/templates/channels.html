@@ -116,13 +116,12 @@ async function loadChans() {
       const topic = c.topic?.value || c.topic || '';
       const topicClean = Panel.stripIrc(topic);
       const safeN = Panel.esc(c.name);
-      const safeT = Panel.esc(topicClean).replace(/'/g, "\\'");
-      return '<tr data-search="' + safeN + ' ' + Panel.esc(topicClean) + '" style="cursor:pointer" onclick="openChanDrawer(\'' + safeN + '\')">'
+      return '<tr data-search="' + safeN + ' ' + Panel.esc(topicClean) + '" style="cursor:pointer" onclick="openChanDrawer(' + Panel.jsArg(c.name) + ')">'
         + '<td class="td-main td-mono">' + safeN + '</td>'
         + '<td class="td-mono">' + (c.num_users ?? 0) + '</td>'
         + '<td class="td-mono text-muted">' + (Panel.esc(modes) || '—') + '</td>'
         + '<td class="text-muted truncate" style="max-width:220px">' + (Panel.esc(topicClean) || '—') + '</td>'
-        + '<td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" onclick="openChanDrawer(\'' + safeN + '\')">details</button></td>'
+        + '<td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" onclick="openChanDrawer(' + Panel.jsArg(c.name) + ')">details</button></td>'
         + '</tr>';
     }));
     Panel.initTableSearch('chanSearch', 'chansTbody');

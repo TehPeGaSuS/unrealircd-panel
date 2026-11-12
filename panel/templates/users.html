@@ -60,6 +60,11 @@
     </div>
 
     <div id="tabWhowas" class="tab-panel">
+      <div class="flex gap-8" style="margin-bottom:8px">
+        <button class="btn btn-ghost btn-sm" id="whowasByNick" onclick="showWhowas('nick')">by nick</button>
+        <button class="btn btn-ghost btn-sm" id="whowasByIp" onclick="showWhowas('ip')" disabled
+                title="Earlier connections from this user's IP, under any nick">by IP</button>
+      </div>
       <div id="whowasLoading" style="color:var(--text-3);font-family:'IBM Plex Mono',monospace;font-size:12px;padding:12px 0">
         Click to load history…
       </div>
@@ -115,6 +120,7 @@
 {% block scripts %}
 <script>
 let activeNick = null;
+let activeIp = '';
 
 async function loadUsers() {
   try {
@@ -154,7 +160,7 @@ async function loadUsers() {
           : '<span class="text-muted">—</span>';
       const repColor = rep === '—' ? '' : rep >= 100 ? 'color:var(--green)' : rep <= 10 ? 'color:var(--red)' : 'color:var(--text-2)';
       const sinceTs = u.connected_since ? (typeof u.connected_since === 'number' ? u.connected_since : new Date(u.connected_since).getTime()/1000) : 0;
-      return '<tr data-search="' + Panel.esc(nick) + ' ' + Panel.esc(host) + ' ' + Panel.esc(ip) + ' ' + Panel.esc(cc) + '"' + ' data-sort0="' + Panel.esc(nick.toLowerCase()) + '"' + ' data-sort3="' + Panel.esc(cc) + '"' + ' data-sort4="' + (rep === '\u2014' ? -1 : rep) + '"' + ' data-sort6="' + sinceTs + '"' + ' style="cursor:pointer" onclick="openUserDrawer(\'' + Panel.esc(nick) + '\')">'
+      return '<tr data-search="' + Panel.esc(nick) + ' ' + Panel.esc(host) + ' ' + Panel.esc(ip) + ' ' + Panel.esc(cc) + '"' + ' data-sort0="' + Panel.esc(nick.toLowerCase()) + '"' + ' data-sort3="' + Panel.esc(cc) + '"' + ' data-sort4="' + (rep === '\u2014' ? -1 : rep) + '"' + ' data-sort6="' + sinceTs + '"' + ' style="cursor:pointer" onclick="openUserDrawer(' + Panel.jsArg(nick) + ')">'
         + '<td class="td-main td-mono">' + Panel.esc(nick) + ' ' + badge + '</td>'
         + '<td class="td-mono text-muted">' + Panel.esc(ident) + '@' + Panel.esc(host) + '</td>'
         + '<td class="td-mono text-muted">' + Panel.esc(ip) + '</td>'
@@ -162,7 +168,7 @@ async function loadUsers() {
         + '<td class="td-mono" style="' + repColor + '">' + rep + '</td>'
         + '<td class="td-mono text-muted">' + (Panel.esc(modes) || '—') + '</td>'
         + '<td class="td-mono text-muted">' + (since ? Panel.fmtTime(since) : '—') + '</td>'
-        + '<td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" onclick="openUserDrawer(\'' + Panel.esc(nick) + '\')">details</button></td>'
+        + '<td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" onclick="openUserDrawer(' + Panel.jsArg(nick) + ')">details</button></td>'
         + '</tr>';
     }));
     Panel.initTableSearch('userSearch', 'usersTbody');
@@ -179,6 +185,9 @@ async function openUserDrawer(nick) {
   document.getElementById('whowasLoading').style.display = '';
   document.getElementById('whowasList').style.display = 'none';
   document.getElementById('whowasList').innerHTML = '';
+  document.getElementById('whowasList').dataset.loadedFor = '';
+  activeIp = '';
+  document.getElementById('whowasByIp').disabled = true;
   document.getElementById('actionNewnick').value = '';
   document.getElementById('actionVhost').value = '';
   document.getElementById('actionMode').value = '';
@@ -197,6 +206,8 @@ async function openUserDrawer(nick) {
   try {
     const u = await Panel.apiGet('/api/users/' + encodeURIComponent(nick) + '/detail');
     const user = u.user || {};
+    activeIp = u.ip || '';
+    document.getElementById('whowasByIp').disabled = !activeIp;
     const geo = u.geoip || {};
     const drawerIp = u.ip || '—';
     const drawerIsLocal = (function(ip) {
@@ -241,14 +252,28 @@ async function openUserDrawer(nick) {
   }
 }
 
-async function loadWhowas(nick) {
+// kind: 'nick' (this nick's history) or 'ip' (anyone from this user's IP)
+function showWhowas(kind) {
+  const value = kind === 'ip' ? activeIp : activeNick;
+  if (!value) return;
+  document.getElementById('whowasByNick').classList.toggle('active', kind === 'nick');
+  document.getElementById('whowasByIp').classList.toggle('active', kind === 'ip');
+  const list = document.getElementById('whowasList');
+  const key = kind + ':' + value;
+  if (list.dataset.loadedFor === key) return;
+  list.dataset.loadedFor = key;
+  loadWhowas(kind, value);
+}
+
+async function loadWhowas(kind, value) {
+  const nick = kind === 'nick' ? value : '';
   const loading = document.getElementById('whowasLoading');
   const list    = document.getElementById('whowasList');
   loading.textContent = '⟳ loading…';
   loading.style.display = '';
   list.style.display = 'none';
   try {
-    const entries = await Panel.apiGet('/api/whowas?nick=' + encodeURIComponent(nick));
+    const entries = await Panel.apiGet('/api/whowas?' + kind + '=' + encodeURIComponent(value));
     loading.style.display = 'none';
     list.style.display = '';
     if (!entries.length) {
@@ -268,7 +293,7 @@ async function loadWhowas(nick) {
           : '<span class="badge badge-muted">' + Panel.esc(e.event||'?') + '</span>';
       return `<div style="border:1px solid var(--border);border-radius:4px;padding:10px 12px;margin-bottom:8px;font-size:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <span class="td-mono" style="font-weight:500;color:var(--text)">${Panel.esc(e.name||nick)}</span>
+          <span class="td-mono" style="font-weight:500;color:var(--text)">${Panel.esc(e.name||nick||'?')}</span>
           ${event_badge}
         </div>
         <div class="detail-grid" style="grid-template-columns:60px 1fr;gap:3px 8px;font-size:11px">
@@ -294,12 +319,7 @@ document.addEventListener('DOMContentLoaded', function() {
     drawer.addEventListener('click', function(e) {
       const btn = e.target.closest('[data-tab="tabWhowas"]');
       if (btn && activeNick) {
-        // Only load if not already loaded for this nick
-        const list = document.getElementById('whowasList');
-        if (!list.dataset.loadedFor || list.dataset.loadedFor !== activeNick) {
-          list.dataset.loadedFor = activeNick;
-          loadWhowas(activeNick);
-        }
+        showWhowas('nick');
       }
     });
   }

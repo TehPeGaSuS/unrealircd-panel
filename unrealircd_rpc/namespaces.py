@@ -132,8 +132,9 @@ class User(_Namespace):
         })
         return result.get("client") if isinstance(result, dict) else None
 
-    def set_nick(self, nick: str, newnick: str) -> Any:
-        return self._q("user.set_nick", {"nick": nick, "newnick": newnick})
+    def set_nick(self, nick: str, newnick: str, force: bool = False) -> Any:
+        """force=True bypasses Q-Lines and nick-change restrictions."""
+        return self._q("user.set_nick", {"nick": nick, "newnick": newnick, "force": force})
 
     def set_username(self, nick: str, username: str) -> Any:
         return self._q("user.set_username", {"nick": nick, "username": username})
@@ -179,8 +180,14 @@ class User(_Namespace):
     ) -> Any:
         return self._q("user.join", {"nick": nick, "channel": channel, "key": key, "force": force})
 
-    def part(self, nick: str, channel: str, force: bool = False) -> Any:
-        return self._q("user.part", {"nick": nick, "channel": channel, "force": force})
+    def part(
+        self,
+        nick: str,
+        channel: str,
+        reason: Optional[str] = None,
+        force: bool = False,
+    ) -> Any:
+        return self._q("user.part", {"nick": nick, "channel": channel, "reason": reason, "force": force})
 
     def quit(self, nick: str, reason: str) -> Any:
         return self._q("user.quit", {"nick": nick, "reason": reason})
@@ -498,18 +505,57 @@ class Log(_Namespace):
 
 
 # ---------------------------------------------------------------------------
+# whowas.*
+# ---------------------------------------------------------------------------
+
+class Whowas(_Namespace):
+    def get(
+        self,
+        nick: Optional[str] = None,
+        ip: Optional[str] = None,
+        object_detail_level: int = 2,
+    ) -> List[Any]:
+        """Nick history (WHOWAS); filter by nick and/or IP, or neither for all."""
+        params: dict = {"object_detail_level": object_detail_level}
+        if nick:
+            params["nick"] = nick
+        if ip:
+            params["ip"] = ip
+        result = self._q("whowas.get", params)
+        return result.get("list", []) if isinstance(result, dict) else []
+
+
+# ---------------------------------------------------------------------------
+# connthrottle.*  (needs the connthrottle module, loaded by default)
+# ---------------------------------------------------------------------------
+
+class Connthrottle(_Namespace):
+    def status(self) -> Any:
+        """State, counters, last-minute stats and config of connection throttling."""
+        return self._q("connthrottle.status")
+
+    def set(self, enabled: bool) -> Any:
+        """Enable or disable throttling (like /THROTTLE ON|OFF)."""
+        return self._q("connthrottle.set", {"enabled": enabled})
+
+    def reset(self) -> Any:
+        """Reset the counters (like /THROTTLE RESET)."""
+        return self._q("connthrottle.reset")
+
+
+# ---------------------------------------------------------------------------
 # message.*
 # ---------------------------------------------------------------------------
 
 class Message(_Namespace):
     def privmsg(self, target: str, message: str) -> Any:
-        return self._q("message.privmsg", {"nick": target, "message": message})
+        return self._q("message.send_privmsg", {"nick": target, "message": message})
 
     def notice(self, target: str, message: str) -> Any:
-        return self._q("message.notice", {"nick": target, "message": message})
+        return self._q("message.send_notice", {"nick": target, "message": message})
 
     def numeric(self, nick: str, numeric: int, message: str) -> Any:
-        return self._q("message.numeric", {"nick": nick, "numeric": numeric, "message": message})
+        return self._q("message.send_numeric", {"nick": nick, "numeric": numeric, "message": message})
 
     def standard_reply(
         self,
@@ -533,4 +579,4 @@ class Message(_Namespace):
         }
         if context is not None:
             params["context"] = context
-        return self._q("message.standardreply", params)
+        return self._q("message.send_standard_reply", params)

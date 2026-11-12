@@ -52,7 +52,7 @@ function appendEntry(event) {
   el.className = 'log-entry';
   el.innerHTML = `
     <span class="log-time">${formatLogTime(ts)}</span>
-    <span class="log-level ${level}">${level}</span>
+    <span class="log-level ${Panel.esc(level)}">${Panel.esc(level)}</span>
     <span class="log-msg">${Panel.esc(msg)}</span>
   `;
   stream.appendChild(el);

@@ -185,9 +185,15 @@ async function loadBans() {
     const colspan = CAN_DEL ? 11 : 10;
     Panel.renderTable('bansTbody', bans.map(b => {
       const type    = b.type || b.type_string || '?';
-      const name    = b.name || '?';
+      // Config bans can use a match { } block (a security group) instead of a mask
+      const name    = b.name || (b.match ? '(match block)' : '?');
       const reason  = b.reason || '—';
       const setBy   = b.set_by || '—';
+      // 6.2.8+: automatic bans say what added them, e.g. antimixedutf8, or a spamfilter
+      const source  = b.source || '';
+      const sourceBadge = source || b.spamfilter_id
+        ? ` <span class="badge badge-muted" title="${Panel.esc('Added automatically by ' + (source || 'a spamfilter') + (b.spamfilter_id ? ' (spamfilter ' + b.spamfilter_id + ')' : ''))}">${Panel.esc(source || 'spamfilter')}${b.spamfilter_id ? ' · ' + Panel.esc(b.spamfilter_id) : ''}</span>`
+        : '';
       const expires = b.expire_at ? Panel.fmtDate(b.expire_at) : 'permanent';
       const setAt    = b.set_at ? Panel.fmtDate(b.set_at) : '—';
       const setAtTs  = b.set_at ? new Date(b.set_at).getTime() : 0;
@@ -198,21 +204,22 @@ async function loadBans() {
       const hitsTs   = typeof b.hits === 'number' ? b.hits : -1;
       const lastHitTs = b.last_hit_at ? new Date(b.last_hit_at).getTime() : 0;
       const badge   = TYPE_BADGES[type.toLowerCase()] || 'badge-muted';
-      const key     = Panel.esc(name) + '|' + Panel.esc(type);
+      const key     = name + '|' + type;
       const cbCol   = CAN_DEL
-        ? `<td onclick="event.stopPropagation()"><input type="checkbox" data-key="${key}" style="accent-color:var(--accent)" onchange="updateBatchToolbar()"></td>`
+        ? b.set_in_config ? '<td></td>' : `<td onclick="event.stopPropagation()"><input type="checkbox" data-key="${Panel.esc(key)}" style="accent-color:var(--accent)" onchange="updateBatchToolbar()"></td>`
         : '';
       const actions = `<div class="flex gap-8">
-        ${CAN_ADD && CAN_DEL ? `<button class="btn btn-ghost btn-sm" onclick="openEditBan('${key}')">edit</button>` : ''}
-        ${CAN_DEL ? `<button class="btn btn-danger btn-sm" onclick="delBan('${Panel.esc(name)}','${Panel.esc(type)}')">remove</button>` : ''}
+        ${CAN_ADD && CAN_DEL && !b.set_in_config ? `<button class="btn btn-ghost btn-sm" onclick="openEditBan(${Panel.jsArg(key)})">edit</button>` : ''}
+        ${CAN_DEL && b.set_in_config ? Panel.CONFIG_BADGE : ''}
+        ${CAN_DEL && !b.set_in_config ? `<button class="btn btn-danger btn-sm" onclick="delBan(${Panel.jsArg(name)},${Panel.jsArg(type)})">remove</button>` : ''}
       </div>`;
-      return `<tr data-search="${Panel.esc(type)} ${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)} ${Panel.esc(banId)}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${expireTs}" data-sort2="${setAtTs}" data-sort3="${hitsTs}" data-sort4="${lastHitTs}">
+      return `<tr data-search="${Panel.esc(type)} ${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)} ${Panel.esc(banId)} ${Panel.esc(source)} ${Panel.esc(b.spamfilter_id || '')}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${expireTs}" data-sort2="${setAtTs}" data-sort3="${hitsTs}" data-sort4="${lastHitTs}">
         ${cbCol}
         <td><span class="badge ${badge}">${Panel.esc(type.toUpperCase())}</span></td>
         <td class="td-mono td-main">${Panel.esc(name)}</td>
         <td class="td-mono text-muted" style="font-size:11px" title="${Panel.esc(banId)}">${banId ? `<span style="cursor:help;letter-spacing:.5px">${Panel.esc(banId)}</span>` : '—'}</td>
         <td class="text-muted">${Panel.esc(reason)}</td>
-        <td class="td-mono text-muted">${Panel.esc(setBy)}</td>
+        <td class="td-mono text-muted">${Panel.esc(setBy)}${sourceBadge}</td>
         <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
         <td class="td-mono text-muted">${Panel.esc(expires)}</td>
         <td class="td-mono text-muted">${hits}</td>

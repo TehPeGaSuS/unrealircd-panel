@@ -325,9 +325,9 @@ function renderMap(geo, data) {
       const name  = entry.country_name || feature.properties.NAME || cc;
       const nicks = entry.nicks.slice(0,8).join(', ') + (entry.nicks.length === 10 ? '…' : '');
       layer.bindTooltip(`
-        <div class="tt-country">${name}</div>
+        <div class="tt-country">${Panel.esc(name)}</div>
         <div class="tt-count">${entry.count} user${entry.count===1?'':'s'}</div>
-        ${nicks ? '<div class="tt-nicks">' + nicks + '</div>' : ''}
+        ${nicks ? '<div class="tt-nicks">' + Panel.esc(nicks) + '</div>' : ''}
       `, { sticky: true, opacity: 1 });
 
       layer.on('mouseover', function() { this.setStyle({ fillOpacity: 1, weight: 1.5 }); });
@@ -360,13 +360,13 @@ function renderCountryList(data) {
 
   list.innerHTML = sorted.map(([cc, entry]) => {
     const pct  = Math.round((entry.count / max) * 100);
-    const flag = cc !== '??' ? `<img class="country-flag" src="https://flagcdn.com/20x15/${cc.toLowerCase()}.png" alt="${cc}">` :
+    const flag = cc !== '??' ? `<img class="country-flag" src="https://flagcdn.com/20x15/${encodeURIComponent(cc.toLowerCase())}.png" alt="${Panel.esc(cc)}">` :
                                `<div class="country-flag-placeholder">?</div>`;
     const name = entry.country_name || cc;
     return `<div class="country-row">
       <div class="country-bar" style="width:${pct}%"></div>
       ${flag}
-      <span class="country-name" title="${name}">${name}</span>
+      <span class="country-name" title="${Panel.esc(name)}">${Panel.esc(name)}</span>
       <span class="country-count">${entry.count}</span>
     </div>`;
   }).join('');

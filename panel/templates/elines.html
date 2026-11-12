@@ -166,7 +166,8 @@ async function loadElines() {
         <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
         <td class="td-mono text-muted">${Panel.esc(expires)}</td>
         <td>
-          ${CAN_DEL ? `<button class="btn btn-danger btn-sm" onclick="deleteEline('${Panel.esc(mask).replace(/'/g,"\\'")}')">remove</button>` : ''}
+          ${CAN_DEL && e.set_in_config ? Panel.CONFIG_BADGE : ''}
+          ${CAN_DEL && !e.set_in_config ? `<button class="btn btn-danger btn-sm" onclick="deleteEline(${Panel.jsArg(mask)})">remove</button>` : ''}
         </td>
       </tr>`;
     }));

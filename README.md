@@ -80,7 +80,8 @@ The only values that matter out of the box:
 |---|---|
 | `RPC_PASSWORD` | Matches `password` in your `rpc-user` block |
 | `PANEL_PASSWORD` | Your panel login password |
-| `PANEL_SECRET` | Any long random string (`python3 -c "import secrets; print(secrets.token_hex(32))"`) |
+| `PANEL_SECRET` | Any long random string (`python3 -c "import secrets; print(secrets.token_hex(32))"`). If unset, a random one is used and everyone is logged out on restart |
+| `PANEL_COOKIE_SECURE` | `true` when the panel is served over HTTPS (default `false`) |
 | `NETWORK_NAME` | Displayed in the UI (default: `UnrealIRCd`) |
 | `RPC_TLS_VERIFY` | `false` for self-signed certs, `true` for real certs |
 

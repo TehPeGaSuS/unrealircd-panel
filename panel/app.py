@@ -2,7 +2,7 @@
 UnrealIRCd Admin Panel — app.py
 """
 
-import os, sys, json, threading, time, logging, hashlib, secrets
+import os, sys, json, threading, time, logging, hashlib, hmac, secrets
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -11,14 +11,28 @@ from flask import (
     Flask, render_template, redirect, url_for, request,
     session, jsonify, Response, stream_with_context, send_from_directory,
 )
+from werkzeug.security import generate_password_hash, check_password_hash
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s")
 log = logging.getLogger("panel")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("PANEL_SECRET", "change-me-in-production")
+_secret = os.environ.get("PANEL_SECRET", "")
+if not _secret or _secret.startswith("changeme") or _secret == "change-me-in-production":
+    # A known secret lets anyone forge an admin session cookie. Fall back to a
+    # random one: safe, but everyone is logged out when the panel restarts.
+    log.warning("PANEL_SECRET is not set (or still the example value); "
+                "using a random one, sessions will not survive a restart")
+    _secret = secrets.token_hex(32)
+app.secret_key = _secret
 app.permanent_session_lifetime = 86400 * 7
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    # Set PANEL_COOKIE_SECURE=true when the panel is served over HTTPS
+    SESSION_COOKIE_SECURE=os.environ.get("PANEL_COOKIE_SECURE", "false").lower() == "true",
+)
 
 # In-memory last-login tracker for the env admin (not persisted to disk)
 _env_admin_last_login = {}
@@ -52,6 +66,7 @@ ALL_PERMISSIONS = {
     # Servers
     "view_servers":  "View Servers",
     "rehash":        "Rehash Servers",
+    "connthrottle":  "Connection Throttling (on/off/reset)",
     # Bans
     "view_bans":     "View Bans",
     "ban_add":       "Add Bans",
@@ -80,26 +95,39 @@ def _save_extra_users(users):
     USERS_FILE.write_text(json.dumps(users, indent=2))
 
 def _hash_pw(pw):
-    salt = secrets.token_hex(16)
-    return f"{salt}:{hashlib.sha256((salt+pw).encode()).hexdigest()}"
+    return generate_password_hash(pw)
+
+def _is_legacy_hash(stored):
+    """Old format: '<hex salt>:<sha256 hex>' (or, older still, plain text)."""
+    return not stored.startswith(("scrypt:", "pbkdf2:"))
 
 def _check_pw(pw, stored):
+    if not _is_legacy_hash(stored):
+        return check_password_hash(stored, pw)
     if ":" not in stored:
-        return stored == pw
+        return hmac.compare_digest(stored.encode(), pw.encode())
     salt, h = stored.split(":", 1)
-    return hashlib.sha256((salt+pw).encode()).hexdigest() == h
+    return hmac.compare_digest(hashlib.sha256((salt+pw).encode()).hexdigest(), h)
+
+def _user_role_perms(eu):
+    role = eu.get("role", "admin")
+    if role == "admin":
+        return role, ADMIN_PERMS
+    return role, set(eu.get("permissions", []))
 
 def check_credentials(u, p):
-    """Return (role, permissions_set) or None."""
-    if u == PANEL_USER and p == PANEL_PASSWORD and PANEL_PASSWORD:
+    """Return (role, permissions_set), or (None, set()) on failure."""
+    if PANEL_PASSWORD and hmac.compare_digest(u.encode(), PANEL_USER.encode()) \
+            and hmac.compare_digest(p.encode(), PANEL_PASSWORD.encode()):
         return "admin", ADMIN_PERMS
-    for eu in _load_extra_users():
+    users = _load_extra_users()
+    for eu in users:
         if eu["username"] == u and _check_pw(p, eu["password"]):
-            role = eu.get("role", "admin")
-            if role == "admin":
-                return role, ADMIN_PERMS
-            perms = set(eu.get("permissions", []))
-            return role, perms
+            if _is_legacy_hash(eu["password"]):
+                # Upgrade the stored hash now that we know the password
+                eu["password"] = _hash_pw(p)
+                _save_extra_users(users)
+            return _user_role_perms(eu)
     return None, set()
 
 def current_user_can(perm):
@@ -134,8 +162,10 @@ def rpc_call(fn):
     mgr = get_rpc()
     if mgr is None:
         return None, "Not connected to UnrealIRCd"
+    # Every call carries the panel user, so UnrealIRCd logs show who did it
+    issuer = session.get("username") if session.get("logged_in") else None
     try:
-        return mgr.with_retry(fn), None
+        return mgr.with_retry(fn, issuer=issuer), None
     except Exception as exc:
         log.warning("RPC call failed: %s", exc)
         return None, str(exc)
@@ -167,26 +197,26 @@ def permission_required(perm):
     return decorator
 
 @app.before_request
-def set_rpc_issuer():
-    """Keep the RPC issuer in sync with the logged-in panel user.
-    Only sends set_issuer when the username has actually changed
-    (e.g. after reconnect, or first request after login).
-    Uses no_wait so it never blocks the request."""
-    if not session.get("logged_in"):
-        return
-    mgr = get_rpc()
-    if mgr is None:
-        return
-    username = session.get("username", "webpanel")
-    # Track the last issuer we sent; resend if it changed or connection was reset
-    try:
-        client = mgr.get_active()
-        if getattr(client, "_last_issuer", None) != username:
-            mgr.with_retry(lambda c: c.rpc().set_issuer(username))
-            client._last_issuer = username
-    except Exception:
-        pass
+def guard_request():
+    # CSRF: every state-changing API call from the panel's own JS is a JSON
+    # request. A cross-site <form> cannot send application/json, and a
+    # cross-site fetch() with it needs a CORS preflight we never answer.
+    if request.path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS") \
+            and not request.is_json:
+        return jsonify({"error": "Expected a JSON request"}), 415
 
+    # Re-read role/permissions on every request so that deleting a panel
+    # user, or changing their role, takes effect immediately instead of
+    # when their 7-day session cookie expires.
+    if session.get("logged_in") and session.get("username") != PANEL_USER:
+        eu = next((u for u in _load_extra_users() if u["username"] == session.get("username")), None)
+        if eu is None:
+            session.clear()
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Session expired"}), 401
+            return redirect(url_for("login"))
+        role, perms = _user_role_perms(eu)
+        session["role"], session["permissions"] = role, list(perms)
 
 @app.context_processor
 def inject_globals():
@@ -234,11 +264,12 @@ def login():
                 permissions=list(perms)
             )
             session.permanent = True
-            mgr = get_rpc()
-            if mgr:
-                try: mgr.with_retry(lambda c: c.rpc().set_issuer(u))
-                except Exception: pass
-            return redirect(request.args.get("next") or url_for("dashboard"))
+            # Only follow local paths: "//evil.example" or "https://…" would
+            # turn the login page into an open redirect.
+            nxt = request.args.get("next") or ""
+            if not nxt.startswith("/") or nxt.startswith("//") or "\\" in nxt:
+                nxt = url_for("dashboard")
+            return redirect(nxt)
         error = "Invalid credentials"
     return render_template("login.html", error=error)
 
@@ -437,12 +468,9 @@ def api_message_user(nick):
 def api_whowas():
     nick = request.args.get("nick")
     ip   = request.args.get("ip")
-    params = {}
-    if nick: params["nick"] = nick
-    if ip:   params["ip"]   = ip
-    result, err = rpc_call(lambda c: c.query("whowas.get", params or None))
+    result, err = rpc_call(lambda c: c.whowas().get(nick, ip))
     if err: return jsonify({"error": err}), 503
-    return jsonify(result.get("list", []) if isinstance(result, dict) else [])
+    return jsonify(result or [])
 
 # ---------------------------------------------------------------------------
 # API: Channels
@@ -512,6 +540,33 @@ def api_servers():
 @permission_required("rehash")
 def api_rehash(srvname):
     result, err = rpc_call(lambda c: c.server().rehash(srvname))
+    if err: return jsonify({"error": err}), 503
+    return jsonify({"ok": True})
+
+# ---------------------------------------------------------------------------
+# API: Connection throttling (connthrottle module)
+# ---------------------------------------------------------------------------
+@app.route("/api/connthrottle")
+@permission_required("view_servers")
+def api_connthrottle_status():
+    result, err = rpc_call(lambda c: c.connthrottle().status())
+    if err: return jsonify({"error": err}), 503
+    return jsonify(result or {})
+
+@app.route("/api/connthrottle", methods=["POST"])
+@permission_required("connthrottle")
+def api_connthrottle_set():
+    d = request.get_json() or {}
+    if not isinstance(d.get("enabled"), bool):
+        return jsonify({"error": "'enabled' must be true or false"}), 400
+    result, err = rpc_call(lambda c: c.connthrottle().set(d["enabled"]))
+    if err: return jsonify({"error": err}), 503
+    return jsonify({"ok": True})
+
+@app.route("/api/connthrottle/reset", methods=["POST"])
+@permission_required("connthrottle")
+def api_connthrottle_reset():
+    result, err = rpc_call(lambda c: c.connthrottle().reset())
     if err: return jsonify({"error": err}), 503
     return jsonify({"ok": True})
 
@@ -681,12 +736,12 @@ def api_log_stream():
         try:
             sc = mgr.new_dedicated_client()
         except Exception as exc:
-            yield f'event: error\ndata: {{"error":"{exc}"}}\n\n'; return
+            yield f'event: error\ndata: {json.dumps({"error": str(exc)})}\n\n'; return
         try:
             sc.log().subscribe(["all","!debug"])
         except Exception as exc:
             sc.close()
-            yield f'event: error\ndata: {{"error":"{exc}"}}\n\n'; return
+            yield f'event: error\ndata: {json.dumps({"error": str(exc)})}\n\n'; return
         yield 'event: connected\ndata: {"status":"connected"}\n\n'
         last_ka = time.time()
         try:
@@ -759,6 +814,16 @@ def api_account():
 # ---------------------------------------------------------------------------
 # API: Settings — Panel users (manage_users permission required)
 # ---------------------------------------------------------------------------
+ROLES = ("admin", "viewer")
+
+def _escalation_error(role, permissions):
+    """manage_users alone must not be enough to create admins (or to give
+    someone manage_users, which could then do it)."""
+    if session.get("role") == "admin":
+        return None
+    if role == "admin" or "manage_users" in (permissions or []):
+        return jsonify({"error": "Only admins can grant the admin role or Manage Panel Users"}), 403
+    return None
 @app.route("/api/settings/users")
 @permission_required("manage_users")
 def api_settings_users_list():
@@ -792,6 +857,10 @@ def api_settings_users_add():
         return jsonify({"error": "Password must be at least 8 characters"}), 400
     if username == PANEL_USER:
         return jsonify({"error": "Cannot shadow the env admin"}), 400
+    if role not in ROLES:
+        return jsonify({"error": "Invalid role"}), 400
+    if (e := _escalation_error(role, permissions)):
+        return e
 
     users = _load_extra_users()
     if any(u["username"]==username for u in users):
@@ -818,6 +887,13 @@ def api_settings_users_update(username):
     user = next((u for u in users if u["username"]==username), None)
     if not user:
         return jsonify({"error": "User not found"}), 404
+    if d.get("role", user.get("role")) not in ROLES:
+        return jsonify({"error": "Invalid role"}), 400
+    # Non-admins may not edit admins, nor grant admin/manage_users
+    if session.get("role") != "admin" and user.get("role", "admin") == "admin":
+        return jsonify({"error": "Only admins can modify admin users"}), 403
+    if (e := _escalation_error(d.get("role"), d.get("permissions"))):
+        return e
 
     if "role" in d:
         user["role"] = d["role"]
@@ -836,6 +912,9 @@ def api_settings_users_update(username):
 def api_settings_users_delete(username):
     if username == PANEL_USER:
         return jsonify({"error": "Cannot delete env admin"}), 403
+    target = next((u for u in _load_extra_users() if u["username"] == username), None)
+    if target and target.get("role", "admin") == "admin" and session.get("role") != "admin":
+        return jsonify({"error": "Only admins can delete admin users"}), 403
     _save_extra_users([u for u in _load_extra_users() if u["username"]!=username])
     return jsonify({"ok": True})
 
@@ -860,7 +939,7 @@ def _save_rpc_servers(servers):
     RPC_SERVERS_FILE.write_text(json.dumps(servers, indent=2))
 
 @app.route("/api/settings/rpc-servers")
-@login_required
+@permission_required("manage_users")
 def api_settings_rpc_list():
     mgr = get_rpc()
     active = mgr._active if mgr else None
@@ -871,7 +950,7 @@ def api_settings_rpc_list():
     return jsonify(out)
 
 @app.route("/api/settings/rpc-servers/test", methods=["POST"])
-@login_required
+@permission_required("manage_users")
 def api_settings_rpc_test():
     d = request.get_json() or {}
     try:
@@ -904,7 +983,7 @@ def api_settings_rpc_delete(srvname):
     return jsonify({"ok": True})
 
 @app.route("/api/settings/rpc-servers/<srvname>/activate", methods=["POST"])
-@login_required
+@permission_required("manage_users")
 def api_settings_rpc_activate(srvname):
     global _rpc
     srv = next((s for s in _load_rpc_servers() if s["name"]==srvname), None)

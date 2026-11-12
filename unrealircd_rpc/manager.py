@@ -39,7 +39,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-from .connection import Connection, ConnectionError, _is_connection_error
+from .connection import Connection, ConnectionError, RPCError, TimeoutError, _is_connection_error
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +73,17 @@ class _ServerConfig:
         return f"{self.rpc_user}:{self.rpc_password}"
 
 
+# Methods that only read state: replaying one after a lost reply is harmless.
+_READ_ONLY_SUFFIXES = ("list", "get", "info", "status", "module_list")
+
+
+def _safe_to_retry(exc: Exception) -> bool:
+    if getattr(exc, "sent", True) is False:
+        return True
+    method = getattr(exc, "method", None) or ""
+    return method.rsplit(".", 1)[-1] in _READ_ONLY_SUFFIXES
+
+
 class _ManagedClient:
     """A Connection plus error-tracking metadata."""
 
@@ -84,6 +95,8 @@ class _ManagedClient:
         self._last_error: Optional[float] = None
         self._last_success: Optional[float] = None
         self._lock = threading.Lock()
+        # Held for a whole with_retry() call: set_issuer + the call(s) in fn
+        self.call_lock = threading.Lock()
 
     def record_error(self) -> bool:
         """Record a failure. Returns True if reconnect is recommended."""
@@ -242,17 +255,27 @@ class Manager:
     # with_retry  (the main call pattern for Flask routes)
     # ------------------------------------------------------------------
 
-    def with_retry(self, fn: Callable[[Connection], Any]) -> Any:
+    def with_retry(
+        self,
+        fn: Callable[[Connection], Any],
+        issuer: Optional[str] = None,
+    ) -> Any:
         """
         Execute fn(conn) with automatic reconnection on transport errors.
 
         Usage:
-            result = rpc.with_retry(lambda c: c.user().get_all())
+            result = rpc.with_retry(lambda c: c.user().get_all(), issuer="alice")
 
-        - On first call, uses the active connection.
-        - If a connection error is detected (or error count >= 2),
-          reconnects and retries fn once.
-        - Application-level RPCErrors are NOT retried — they propagate.
+        - issuer: panel user the call is made for. rpc.set_issuer is sent on
+          the same connection right before fn, while holding the client's
+          call lock, so concurrent panel users are never attributed each
+          other's actions in UnrealIRCd's logs.
+        - On a connection error, reconnects and retries fn once, but only
+          when that cannot run an action twice: the request never left
+          (send failed) or the method only reads (*.list, *.get, ...).
+          A kill or ban whose reply was lost is reported, not replayed.
+        - Application-level RPCErrors are NOT retried and do not count as
+          connection trouble — they propagate.
 
         Raises:
             ConnectionError: if reconnect also fails
@@ -274,29 +297,43 @@ class Manager:
             client = self._reconnect(active_name)
 
         try:
-            result = fn(client.conn)
+            result = self._run(client, fn, issuer)
             client.record_success()
             return result
+        except RPCError:
+            client.record_success()  # the transport works fine
+            raise
         except Exception as exc:
-            should_reconnect = client.record_error()
+            client.record_error()
+            if not (_is_connection_error(exc) or isinstance(exc, (ConnectionError, TimeoutError))):
+                raise
 
-            if _is_connection_error(exc) or should_reconnect:
-                log.warning("RPC connection error (%s), attempting reconnect...", exc)
-                try:
-                    new_client = self._reconnect(active_name)
-                except Exception as reconnect_exc:
-                    raise ConnectionError(
-                        f"Connection lost: {exc}; reconnect failed: {reconnect_exc}"
-                    ) from exc
+            log.warning("RPC connection error (%s), attempting reconnect...", exc)
+            try:
+                new_client = self._reconnect(active_name)
+            except Exception as reconnect_exc:
+                raise ConnectionError(
+                    f"Connection lost: {exc}; reconnect failed: {reconnect_exc}"
+                ) from exc
 
-                try:
-                    result = fn(new_client.conn)
-                    new_client.record_success()
-                    return result
-                except Exception:
-                    raise  # Don't retry a second time
+            if not _safe_to_retry(exc):
+                raise ConnectionError(
+                    f"Connection lost after sending '{getattr(exc, 'method', '?')}'; "
+                    f"not retrying since it may already have been done ({exc})"
+                ) from exc
 
-            raise  # Non-connection error, propagate as-is
+            result = self._run(new_client, fn, issuer)  # no second retry
+            new_client.record_success()
+            return result
+
+    @staticmethod
+    def _run(client: "_ManagedClient", fn: Callable[[Connection], Any], issuer: Optional[str]) -> Any:
+        with client.call_lock:
+            conn = client.conn
+            if issuer and conn.current_issuer != issuer:
+                conn.query("rpc.set_issuer", {"name": issuer}, no_wait=True)
+                conn.current_issuer = issuer
+            return fn(conn)
 
     # ------------------------------------------------------------------
     # Dedicated streaming client

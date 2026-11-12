@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# Local config and data: contain passwords
+.env
+panel/users.json
+panel/rpc_servers.json
+
+virtualenv/
+.venv/

@@ -153,8 +153,22 @@
     <div class="section-title">Reason</div>
     <div id="sfDrawerReason" style="color:var(--text-2);font-size:13px;padding:4px 0 16px"></div>
 
+    <div id="sfDrawerIdWrap" style="display:none">
+      <div class="section-title">ID</div>
+      <div id="sfDrawerId" class="td-mono" style="color:var(--text-2);font-size:13px;padding:4px 0 16px"></div>
+    </div>
+    <div id="sfDrawerRuleWrap" style="display:none">
+      <div class="section-title">Rule</div>
+      <div id="sfDrawerRule" class="td-mono" style="word-break:break-all;color:var(--text-2);font-size:12px;padding:4px 0 16px"></div>
+    </div>
+    <div id="sfDrawerExceptWrap" style="display:none">
+      <div class="section-title">Except</div>
+      <div id="sfDrawerExcept" class="detail-grid" style="font-size:12px;padding:4px 0 16px"></div>
+    </div>
+
     {% if can('ban_del') %}
-    <button class="btn btn-danger" onclick="deleteFromDrawer()" style="width:100%">Remove Entry</button>
+    <button class="btn btn-danger" id="sfDrawerRemove" onclick="deleteFromDrawer()" style="width:100%">Remove Entry</button>
+    <div id="sfDrawerConfigNote" class="text-muted" style="font-size:12px;display:none">Set in the configuration file; remove it there and rehash.</div>
     {% endif %}
   </div>
 </div>
@@ -257,7 +271,7 @@ async function loadSf() {
 
     Panel.renderTable('sfTbody', entries.map(sf => {
       const key      = sfKey(sf);
-      const pattern  = sf.name || '?';
+      const pattern  = isRuleOnly(sf) ? 'rule: ' + sf.rule : (sf.name || '?');
       const match    = sf.match_type || '—';
       const targets  = targetsToString(sf.spamfilter_targets);
       const action   = sf.ban_action || '—';
@@ -271,9 +285,9 @@ async function loadSf() {
       const lastHitTs = sf.last_hit_at ? new Date(sf.last_hit_at).getTime() : 0;
       const badge    = ACTION_BADGES[action.toLowerCase()] || 'badge-muted';
 
-      return `<tr data-search="${Panel.esc(pattern)} ${Panel.esc(targets)} ${Panel.esc(action)} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
+      return `<tr data-search="${Panel.esc(pattern)} ${Panel.esc(targets)} ${Panel.esc(action)} ${Panel.esc(reason)} ${Panel.esc(setBy)} ${Panel.esc(sf.id || "")}"
                   data-sort0="${Panel.esc(pattern.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${hitsTs}" data-sort3="${lastHitTs}"
-                  style="cursor:pointer" onclick="openDrawer('${Panel.esc(key).replace(/'/g,"\\'")}')">
+                  style="cursor:pointer" onclick="openDrawer(${Panel.jsArg(key)})">
         <td class="td-main td-mono" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
             title="${Panel.esc(pattern)}">${Panel.esc(pattern)}</td>
         <td class="td-mono text-muted">${Panel.esc(match)}</td>
@@ -287,7 +301,8 @@ async function loadSf() {
         <td class="td-mono text-muted">${hits}</td>
         <td class="td-mono text-muted">${Panel.esc(lastHit)}</td>
         <td onclick="event.stopPropagation()">
-          ${CAN_DEL ? `<button class="btn btn-danger btn-sm" onclick="deleteSf('${Panel.esc(key).replace(/'/g,"\\'")}')">remove</button>` : ''}
+          ${CAN_DEL && sf.set_in_config ? Panel.CONFIG_BADGE : ''}
+          ${CAN_DEL && !sf.set_in_config ? `<button class="btn btn-danger btn-sm" onclick="deleteSf(${Panel.jsArg(key)})">remove</button>` : ''}
         </td>
       </tr>`;
     }));
@@ -299,13 +314,24 @@ async function loadSf() {
 }
 
 // ── Drawer ────────────────────────────────────────────────────────────────
+// Config spamfilters with only a spamfilter::rule come back with match_type
+// "none" and an internal name "$RULE:<rule>"; show the rule instead.
+function isRuleOnly(sf) {
+  return !!sf.rule && (sf.match_type === 'none' || !sf.name || sf.name.startsWith('$RULE:'));
+}
+
+function showOptional(wrapId, id, value) {
+  document.getElementById(wrapId).style.display = value ? '' : 'none';
+  document.getElementById(id).textContent = value || '';
+}
+
 function openDrawer(key) {
   const sf = sfMap[key];
   if (!sf) return;
   drawerKey = key;
 
-  document.getElementById('sfDrawerTitle').textContent = sf.name || 'Spamfilter';
-  document.getElementById('sfDrawerPattern').textContent = sf.name || '—';
+  document.getElementById('sfDrawerTitle').textContent = isRuleOnly(sf) ? 'Rule-only spamfilter' : (sf.name || 'Spamfilter');
+  document.getElementById('sfDrawerPattern').textContent = isRuleOnly(sf) ? '(no match string, rule only, see below)' : (sf.name || '—');
   document.getElementById('sfDrawerMatch').textContent = sf.match_type || '—';
 
   const actionBadge = ACTION_BADGES[sf.ban_action?.toLowerCase()] || 'badge-muted';
@@ -320,6 +346,19 @@ function openDrawer(key) {
   document.getElementById('sfDrawerHits').textContent = sf.hits ?? '—';
   document.getElementById('sfDrawerLastHit').textContent = sf.last_hit_at ? Panel.fmtDate(sf.last_hit_at) : '—';
   document.getElementById('sfDrawerReason').textContent = sf.reason || '—';
+  showOptional('sfDrawerIdWrap', 'sfDrawerId', sf.id);
+  showOptional('sfDrawerRuleWrap', 'sfDrawerRule', sf.rule);
+  // spamfilter::except is a security group (6.2.8+ shows it under "except")
+  const exc = sf.except && typeof sf.except === 'object' ? Object.entries(sf.except) : [];
+  document.getElementById('sfDrawerExceptWrap').style.display = exc.length ? '' : 'none';
+  document.getElementById('sfDrawerExcept').innerHTML = exc.map(([k, v]) =>
+    `<span class="detail-key">${Panel.esc(k)}</span><span class="detail-val td-mono">${Panel.esc(Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`
+  ).join('');
+  const removeBtn = document.getElementById('sfDrawerRemove');
+  if (removeBtn) {
+    removeBtn.style.display = sf.set_in_config ? 'none' : '';
+    document.getElementById('sfDrawerConfigNote').style.display = sf.set_in_config ? '' : 'none';
+  }
 
   Panel.openDrawer('sfDrawer');
 }

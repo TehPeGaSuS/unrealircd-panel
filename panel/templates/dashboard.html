@@ -35,6 +35,25 @@
   </div>
 </div>
 
+{% if can('view_servers') %}
+<!-- Connection throttling (connthrottle) -->
+<div class="table-wrap" style="margin-bottom:16px" id="ctCard">
+  <div class="table-toolbar">
+    <span class="table-title">Connection Throttling</span>
+    <span id="ctState" class="badge badge-muted">…</span>
+    {% if can('connthrottle') %}
+    <div class="flex gap-8" style="margin-left:auto">
+      <button class="btn btn-ghost btn-sm" id="ctToggle" onclick="ctToggle()" disabled>…</button>
+      <button class="btn btn-ghost btn-sm" onclick="ctReset()">Reset counters</button>
+    </div>
+    {% endif %}
+  </div>
+  <div class="detail-grid" id="ctDetail" style="padding:10px 14px">
+    <span class="detail-key">loading</span><span class="detail-val">…</span>
+  </div>
+</div>
+{% endif %}
+
 <!-- Recent users -->
 <div class="table-wrap" style="margin-bottom:16px">
   <div class="table-toolbar">
@@ -137,7 +156,63 @@ async function loadDashChans() {
   }
 }
 
+// ── Connection throttling ────────────────────────────────────────────────
+const CT_STATES = {
+  monitoring:           ['monitoring',            'badge-green', 'Counting new connections; not throttling.'],
+  throttling:           ['throttling',            'badge-red',   'Too many new connections: unknown users are being rejected.'],
+  start_delay:          ['start delay',           'badge-amber', 'Not active yet, the server started recently.'],
+  reputation_gathering: ['gathering reputation',  'badge-amber', 'Not active yet, still learning which IPs are known users.'],
+  disabled_by_oper:     ['disabled',              'badge-muted', 'Turned off by an oper (/THROTTLE OFF or this panel).'],
+};
+let ctEnabled = null;
+
+async function loadThrottle() {
+  if (!document.getElementById('ctCard')) return;
+  try {
+    const s = await Panel.apiGet('/api/connthrottle');
+    const [label, badge, help] = CT_STATES[s.state] || [s.state || '?', 'badge-muted', ''];
+    const st = document.getElementById('ctState');
+    st.className = 'badge ' + badge; st.textContent = label; st.title = help;
+    ctEnabled = !!s.enabled;
+    const tg = document.getElementById('ctToggle');
+    if (tg) { tg.disabled = false; tg.textContent = ctEnabled ? 'Turn off' : 'Turn on'; }
+    const c = s.counters || {}, cfg = s.config || {}, last = s.stats_last_minute || {};
+    const rows = [
+      ['local',        `${c.local_count ?? 0} / ${cfg.local_throttle_count ?? '?'} per ${cfg.local_throttle_period ?? '?'}s`],
+      ['global',       `${c.global_count ?? 0} / ${cfg.global_throttle_count ?? '?'} per ${cfg.global_throttle_period ?? '?'}s`],
+      ['last minute',  `${last.rejected_clients ?? 0} rejected, ${last.allowed_except ?? 0} allowed (exempt), ${last.allowed_unknown_users ?? 0} allowed (unknown)`],
+    ];
+    if (s.start_delay_remaining > 0) rows.push(['start delay', `${s.start_delay_remaining}s left`]);
+    document.getElementById('ctDetail').innerHTML = rows.map(([k, v]) =>
+      `<span class="detail-key">${Panel.esc(k)}</span><span class="detail-val td-mono">${Panel.esc(v)}</span>`).join('');
+  } catch(e) {
+    document.getElementById('ctDetail').innerHTML =
+      `<span class="detail-key">error</span><span class="detail-val" style="color:var(--red)">${Panel.esc(e.message)}</span>`;
+  }
+}
+
+function ctToggle() {
+  if (ctEnabled === null) return;
+  const on = !ctEnabled;
+  Panel.confirm(on ? 'Enable throttling' : 'Disable throttling',
+    on ? 'Turn connection throttling back on?'
+       : 'Turn connection throttling off? Connection floods will no longer be throttled until it is turned back on.',
+    async () => {
+      try { await Panel.apiPost('/api/connthrottle', { enabled: on }); Panel.toast('Throttling ' + (on ? 'enabled' : 'disabled'), 'ok'); }
+      catch(e) { Panel.toast(e.message, 'error'); }
+      loadThrottle();
+    }, !on);
+}
+
+async function ctReset() {
+  try { await Panel.apiPost('/api/connthrottle/reset', {}); Panel.toast('Counters reset', 'ok'); }
+  catch(e) { Panel.toast(e.message, 'error'); }
+  loadThrottle();
+}
+
 loadStats();
+loadThrottle();
+setInterval(loadThrottle, 30000);
 loadDashUsers();
 loadDashChans();
 setInterval(loadStats, 30000);

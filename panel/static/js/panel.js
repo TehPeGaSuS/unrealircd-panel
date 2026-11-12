@@ -129,7 +129,7 @@ function tableLoadingState(tbodyId, msg = '⟳ loading…') {
 
 function tableErrorState(tbodyId, msg) {
   const tbody = document.getElementById(tbodyId);
-  if (tbody) tbody.innerHTML = `<tr><td colspan="99" class="table-state" style="color:var(--red)">${msg}</td></tr>`;
+  if (tbody) tbody.innerHTML = `<tr><td colspan="99" class="table-state" style="color:var(--red)">${esc(msg)}</td></tr>`;
 }
 
 /**
@@ -294,7 +294,21 @@ function fmtDuration(secs) {
 function esc(str) {
   return String(str ?? '')
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// A value as a JS string literal for an inline handler, e.g.
+//   onclick="openUser(${Panel.jsArg(nick)})"
+// esc() alone is not enough there: the browser decodes the attribute before
+// parsing the JS, so quotes and backslashes in the value (nicks like
+// foo\bar, regex spamfilters, channel names with ') would break out of or
+// mangle a hand-quoted '...' string.
+// Shown instead of "remove" for entries from unrealircd.conf (set_in_config):
+// JSON-RPC cannot delete those, they have to be removed from the config.
+const CONFIG_BADGE = '<span class="badge badge-muted" title="Set in the configuration file; remove it there and rehash">config</span>';
+
+function jsArg(value) {
+  return esc(JSON.stringify(String(value ?? '')));
 }
 
 // Strip mIRC/IRC formatting codes before display
@@ -326,7 +340,7 @@ window.Panel = {
   api, apiGet, apiPost, apiDelete,
   toast, openModal, closeModal,
   renderTable, tableLoadingState, tableErrorState, initTableSearch, initSortableTable,
-  confirm, fmtTime, fmtDate, fmtDuration, esc, stripIrc,
+  confirm, fmtTime, fmtDate, fmtDuration, esc, jsArg, stripIrc, CONFIG_BADGE,
 };
 
 // ============================================================

@@ -160,7 +160,7 @@ async function loadSg() {
         : (isPublic ? '<span class="badge badge-muted">public</span>' : '<span class="badge badge-amber">private</span>');
 
       return `<tr data-search="${Panel.esc(name)}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${typeof sg.priority === 'number' ? sg.priority : -1}"
-                  style="cursor:pointer" onclick="openDrawer('${Panel.esc(name).replace(/'/g,"\\'")}')">
+                  style="cursor:pointer" onclick="openDrawer(${Panel.jsArg(name)})">
         <td class="td-main td-mono">${Panel.esc(name)}</td>
         <td class="td-mono text-muted">${priority}</td>
         <td>${visBadge}</td>
