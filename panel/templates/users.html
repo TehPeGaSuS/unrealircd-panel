@@ -156,7 +156,7 @@ async function loadUsers() {
       const countryHtml = isLocal
         ? '<span class="badge badge-local" title="Local/private connection">⌂ local</span>'
         : cc
-          ? '<img src="https://flagcdn.com/20x15/' + cc.toLowerCase() + '.png" width="20" height="15" alt="' + Panel.esc(cc) + '" title="' + Panel.esc(cc) + '" style="vertical-align:middle;border-radius:2px"> ' + Panel.esc(cc)
+          ? '<img src="{{ url_for('static', filename='vendor/flags/') }}' + encodeURIComponent(cc.toLowerCase()) + '.png" onerror="this.style.visibility=\'hidden\'" width="20" height="15" alt="' + Panel.esc(cc) + '" title="' + Panel.esc(cc) + '" style="vertical-align:middle;border-radius:2px"> ' + Panel.esc(cc)
           : '<span class="text-muted">—</span>';
       const repColor = rep === '—' ? '' : rep >= 100 ? 'color:var(--green)' : rep <= 10 ? 'color:var(--red)' : 'color:var(--text-2)';
       const sinceTs = u.connected_since ? (typeof u.connected_since === 'number' ? u.connected_since : new Date(u.connected_since).getTime()/1000) : 0;

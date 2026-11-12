@@ -3,7 +3,7 @@
 {% block topbar_title %}User Map{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
 <style>
   /* Override main-content overflow so the map fills available space */
   .main-content { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -182,6 +182,13 @@
     white-space: nowrap;
   }
   .leaflet-tooltip::before { display: none; }
+  .leaflet-container .leaflet-control-attribution {
+    background: var(--surface);
+    color: var(--text-3);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+  }
+  .leaflet-control-attribution a { color: var(--text-2); }
 
   .tt-country { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
   .tt-count { color: var(--accent); }
@@ -223,8 +230,9 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
 <script>
+const FLAG_BASE = "{{ url_for('static', filename='vendor/flags/') }}";
 // ── Colour scale ─────────────────────────────────────────────────────────
 // Light → dark blue, adapts to both themes
 const LIGHT_STEPS = ['#e8f0ff','#b8ccf8','#7fa8ee','#4d7dd4','#1a52b8','#0a2d8a'];
@@ -248,10 +256,9 @@ function countryColor(count, max) {
 // ── Map init ─────────────────────────────────────────────────────────────
 const isDark = () => document.documentElement.getAttribute('data-theme') === 'dark';
 
-const tileLight = 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png';
-const tileDark  = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png';
-const tileAttr  = '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://osm.org/copyright">OSM</a>';
-
+// No tile layer: the map is just the country shapes (bundled Natural Earth
+// data) on a plain "ocean" background, so it needs no tile provider, API key
+// or third-party request. Land/ocean/border colours follow the panel theme.
 const map = L.map('map', {
   center: [20, 10],
   zoom: 2,
@@ -259,11 +266,26 @@ const map = L.map('map', {
   maxZoom: 6,
   zoomControl: true,
   attributionControl: true,
+  maxBounds: [[-75, -220], [90, 220]],
+  maxBoundsViscosity: 0.8,
 });
+map.attributionControl.setPrefix(false);
+map.attributionControl.addAttribution('<a href="https://www.naturalearthdata.com/">Natural Earth</a>');
 
-let tileLayer = L.tileLayer(isDark() ? tileDark : tileLight, {
-  attribution: tileAttr, subdomains: 'abcd', maxZoom: 20,
-}).addTo(map);
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function mapColors() {
+  // SVG presentation attributes can't use var(--x), so resolve them here
+  // Land a step away from the page background so the continents read clearly
+  return isDark()
+    ? { ocean: cssVar('--bg') || '#111210', land: '#23241f', border: '#34352f' }
+    : { ocean: cssVar('--bg') || '#f4f3f0', land: '#e2ded5', border: '#cdc8bd' };
+}
+function applyOcean() {
+  document.getElementById('map').style.background = mapColors().ocean;
+}
+applyOcean();
 
 let geoLayer = null;
 let geoData  = null;   // cached GeoJSON
@@ -272,8 +294,9 @@ let userData = null;   // cached geo API response
 // ── Load GeoJSON once ────────────────────────────────────────────────────
 async function loadGeoJson() {
   if (geoData) return geoData;
-  // Natural Earth 110m countries — small, widely cached
-  const r = await fetch('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson');
+  // Natural Earth 1:110m countries, bundled (public domain); see static/countries.geojson
+  const r = await fetch("{{ url_for('static', filename='countries.geojson') }}");
+  if (!r.ok) throw new Error('could not load country shapes (HTTP ' + r.status + ')');
   geoData = await r.json();
   return geoData;
 }
@@ -304,25 +327,25 @@ function renderMap(geo, data) {
 
   if (geoLayer) { geoLayer.remove(); geoLayer = null; }
 
+  const colors = mapColors();
   geoLayer = L.geoJSON(geo, {
     style: feature => {
-      // Natural Earth uses ISO_A2 — fall back to ADM0_A3_IS first 2 chars
-      const cc = feature.properties.ISO_A2 || '';
-      const entry = countries[cc];
+      // cc comes from Natural Earth's ISO_A2_EH (ISO_A2 is "-99" for France and Norway)
+      const entry = countries[feature.properties.cc];
       return {
-        fillColor:   entry ? countryColor(entry.count, max) : 'transparent',
-        fillOpacity: entry ? 0.85 : 0,
-        color:       'var(--border)',
-        weight:      0.5,
-        opacity:     0.6,
+        fillColor:   entry ? countryColor(entry.count, max) : colors.land,
+        fillOpacity: 1,
+        color:       colors.border,
+        weight:      0.6,
+        opacity:     1,
       };
     },
     onEachFeature: (feature, layer) => {
-      const cc    = feature.properties.ISO_A2 || '';
+      const cc    = feature.properties.cc;
       const entry = countries[cc];
       if (!entry) return;
 
-      const name  = entry.country_name || feature.properties.NAME || cc;
+      const name  = entry.country_name || feature.properties.name || cc;
       const nicks = entry.nicks.slice(0,8).join(', ') + (entry.nicks.length === 10 ? '…' : '');
       layer.bindTooltip(`
         <div class="tt-country">${Panel.esc(name)}</div>
@@ -330,7 +353,7 @@ function renderMap(geo, data) {
         ${nicks ? '<div class="tt-nicks">' + Panel.esc(nicks) + '</div>' : ''}
       `, { sticky: true, opacity: 1 });
 
-      layer.on('mouseover', function() { this.setStyle({ fillOpacity: 1, weight: 1.5 }); });
+      layer.on('mouseover', function() { this.setStyle({ weight: 1.8, color: cssVar('--accent') }); this.bringToFront(); });
       layer.on('mouseout',  function() { geoLayer.resetStyle(this); });
     },
   }).addTo(map);
@@ -360,7 +383,7 @@ function renderCountryList(data) {
 
   list.innerHTML = sorted.map(([cc, entry]) => {
     const pct  = Math.round((entry.count / max) * 100);
-    const flag = cc !== '??' ? `<img class="country-flag" src="https://flagcdn.com/20x15/${encodeURIComponent(cc.toLowerCase())}.png" alt="${Panel.esc(cc)}">` :
+    const flag = cc !== '??' ? `<img class="country-flag" src="${FLAG_BASE}${encodeURIComponent(cc.toLowerCase())}.png" alt="${Panel.esc(cc)}" onerror="this.style.visibility='hidden'">` :
                                `<div class="country-flag-placeholder">?</div>`;
     const name = entry.country_name || cc;
     return `<div class="country-row">
@@ -385,11 +408,7 @@ function renderCountryList(data) {
 
 // ── Theme change → re-render ──────────────────────────────────────────────
 const observer = new MutationObserver(() => {
-  // Swap tile layer
-  tileLayer.remove();
-  tileLayer = L.tileLayer(isDark() ? tileDark : tileLight, {
-    attribution: tileAttr, subdomains: 'abcd', maxZoom: 20,
-  }).addTo(map);
+  applyOcean();
   // Re-render choropleth with new colors
   if (geoData && userData) {
     renderMap(geoData, userData);
