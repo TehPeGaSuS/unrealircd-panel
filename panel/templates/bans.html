@@ -39,21 +39,32 @@
           {% endif %}
           <th>Type</th>
           <th data-sort-col="0">Target</th>
-          <th>ID</th>
           <th>Reason</th>
-          <th>Set by</th>
-          <th data-sort-col="2">Set</th>
           <th data-sort-col="1">Expires</th>
           <th data-sort-col="3">Hits</th>
-          <th data-sort-col="4">Last Hit</th>
           <th></th>
         </tr>
       </thead>
       <tbody id="bansTbody">
-        <tr><td colspan="11" class="table-state">⟳ loading…</td></tr>
+        <tr><td colspan="7" class="table-state">⟳ loading…</td></tr>
       </tbody>
     </table>
   </div>
+</div>
+
+<!-- Details drawer -->
+<div class="drawer-backdrop" id="banDrawerBackdrop"></div>
+<div class="drawer" id="banDrawer">
+  <div class="drawer-header">
+    <span class="drawer-title" id="banDrawerTitle">Ban</span>
+    <button class="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="detail-grid kv-grid" id="banDrawerGrid"></div>
+    <div class="section-title">Reason</div>
+    <div class="detail-val prose" id="banDrawerReason"></div>
+  </div>
+  <div class="drawer-footer" id="banDrawerFooter"></div>
 </div>
 
 <!-- Add ban modal -->
@@ -182,7 +193,6 @@ async function loadBans() {
     bans.forEach(b => { banMap[(b.name||'') + '|' + (b.type||'')] = b; });
 
     if (!bans.length) { Panel.renderTable('bansTbody', [], 'No active bans'); return; }
-    const colspan = CAN_DEL ? 11 : 10;
     Panel.renderTable('bansTbody', bans.map(b => {
       const type    = b.type || b.type_string || '?';
       // Config bans can use a match { } block (a security group) instead of a mask
@@ -208,23 +218,17 @@ async function loadBans() {
       const cbCol   = CAN_DEL
         ? b.set_in_config ? '<td></td>' : `<td onclick="event.stopPropagation()"><input type="checkbox" data-key="${Panel.esc(key)}" style="accent-color:var(--accent)" onchange="updateBatchToolbar()"></td>`
         : '';
-      const actions = `<div class="flex gap-8">
-        ${CAN_ADD && CAN_DEL && !b.set_in_config ? `<button class="btn btn-ghost btn-sm" onclick="openEditBan(${Panel.jsArg(key)})">edit</button>` : ''}
-        ${CAN_DEL && b.set_in_config ? Panel.CONFIG_BADGE : ''}
-        ${CAN_DEL && !b.set_in_config ? `<button class="btn btn-danger btn-sm" onclick="delBan(${Panel.jsArg(name)},${Panel.jsArg(type)})">remove</button>` : ''}
-      </div>`;
-      return `<tr data-search="${Panel.esc(type)} ${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)} ${Panel.esc(banId)} ${Panel.esc(source)} ${Panel.esc(b.spamfilter_id || '')}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${expireTs}" data-sort2="${setAtTs}" data-sort3="${hitsTs}" data-sort4="${lastHitTs}">
+      const actions = `${CAN_DEL && b.set_in_config ? Panel.CONFIG_BADGE : ''}
+        ${CAN_DEL && !b.set_in_config ? `<button class="btn btn-danger btn-sm" onclick="delBan(${Panel.jsArg(name)},${Panel.jsArg(type)})">remove</button>` : ''}`;
+      return `<tr data-search="${Panel.esc(type)} ${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)} ${Panel.esc(banId)} ${Panel.esc(source)} ${Panel.esc(b.spamfilter_id || '')}" data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${expireTs}" data-sort2="${setAtTs}" data-sort3="${hitsTs}" data-sort4="${lastHitTs}"
+                  style="cursor:pointer" onclick="openBanDrawer(${Panel.jsArg(key)})">
         ${cbCol}
         <td><span class="badge ${badge}">${Panel.esc(type.toUpperCase())}</span></td>
-        <td class="td-mono td-main">${Panel.esc(name)}</td>
-        <td class="td-mono text-muted" style="font-size:11px" title="${Panel.esc(banId)}">${banId ? `<span style="cursor:help;letter-spacing:.5px">${Panel.esc(banId)}</span>` : '—'}</td>
-        <td class="text-muted">${Panel.esc(reason)}</td>
-        <td class="td-mono text-muted">${Panel.esc(setBy)}${sourceBadge}</td>
-        <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
-        <td class="td-mono text-muted">${Panel.esc(expires)}</td>
+        <td class="td-mono td-main">${Panel.esc(name)}${sourceBadge}</td>
+        <td class="text-muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
+        <td class="td-mono text-muted" style="white-space:nowrap">${Panel.esc(expires)}</td>
         <td class="td-mono text-muted">${hits}</td>
-        <td class="td-mono text-muted">${Panel.esc(lastHit)}</td>
-        <td onclick="event.stopPropagation()">${actions}</td>
+        <td onclick="event.stopPropagation()" style="white-space:nowrap">${actions}</td>
       </tr>`;
     }));
     Panel.initTableSearch('banSearch', 'bansTbody');
@@ -246,11 +250,48 @@ async function loadBans() {
   } catch(e) { Panel.tableErrorState('bansTbody', e.message); }
 }
 
+// ── Details drawer ────────────────────────────────────────────────────────
+function when(ts) {
+  return ts ? Panel.fmtDate(ts) + ' ' + Panel.fmtTime(ts) + ' (' + Panel.fmtRelative(ts) + ')' : null;
+}
+
+function openBanDrawer(key) {
+  const b = banMap[key];
+  if (!b) return;
+  const type  = b.type || '?';
+  const badge = TYPE_BADGES[type.toLowerCase()] || 'badge-muted';
+  document.getElementById('banDrawerTitle').textContent = b.name || '(match block)';
+  document.getElementById('banDrawerGrid').innerHTML = Panel.detailRows([
+    ['type',       `<span class="badge ${badge}">${Panel.esc(type.toUpperCase())}</span> <span class="text-muted">${Panel.esc(b.type_string || '')}</span>`, {html: true}],
+    ['target',     b.name],
+    ['match',      b.match ? JSON.stringify(b.match) : null],
+    ['id',         b.id],
+    ['set by',     b.set_by],
+    ['added by',   b.source || (b.spamfilter_id ? 'spamfilter' : null)],
+    ['spamfilter', b.spamfilter_id],
+    ['set',        when(b.set_at)],
+    ['expires',    b.expire_at ? when(b.expire_at) : 'never (permanent)'],
+    ['duration',   b.duration_string],
+    ['hits',       b.hits],
+    ['last hit',   b.last_hit_at ? when(b.last_hit_at) : (typeof b.hits === 'number' ? 'never' : null)],
+  ]);
+  document.getElementById('banDrawerReason').textContent = b.reason || '—';
+  const name = b.name || '';
+  document.getElementById('banDrawerFooter').innerHTML = b.set_in_config
+    ? `${Panel.CONFIG_BADGE} <span class="text-muted" style="font-size:12px">Set in the configuration file; remove it there and rehash.</span>`
+    : (CAN_ADD && CAN_DEL ? `<button class="btn btn-ghost" onclick="Panel.closeDrawer('banDrawer');openEditBan(${Panel.jsArg(key)})">Edit</button>` : '')
+      + (CAN_DEL ? `<button class="btn btn-danger" onclick="delBan(${Panel.jsArg(name)},${Panel.jsArg(type)},true)">Remove</button>` : '');
+  document.getElementById('banDrawerFooter').style.display =
+    document.getElementById('banDrawerFooter').innerHTML.trim() ? '' : 'none';
+  Panel.openDrawer('banDrawer');
+}
+
 // ── Single delete ─────────────────────────────────────────────────────────
-function delBan(name, type) {
+function delBan(name, type, fromDrawer) {
   Panel.confirm('Remove Ban', `Remove ${type.toUpperCase()} on ${name}?`, async () => {
     try {
       await Panel.apiDelete(`/api/bans/${encodeURIComponent(name)}?type=${encodeURIComponent(type)}`);
+      if (fromDrawer) Panel.closeDrawer('banDrawer');
       Panel.toast('Ban removed', 'ok');
       loadBans();
     } catch(e) { Panel.toast(e.message, 'error'); }
@@ -284,7 +325,9 @@ function openEditBan(key) {
   editOrigKey = key;
   document.getElementById('editBanType').value     = b.type || 'gline';
   document.getElementById('editBanTarget').value   = b.name || '';
-  document.getElementById('editBanDuration').value = b.duration || '1d';
+  // Pre-fill the time that is left (in seconds, which UnrealIRCd accepts), or 0 if permanent
+  const left = b.expire_at ? Math.max(60, Math.round((new Date(b.expire_at) - Date.now()) / 1000)) : 0;
+  document.getElementById('editBanDuration').value = left ? left + 's' : '0';
   document.getElementById('editBanReason').value   = b.reason || '';
   Panel.openModal('editBanModal');
 }

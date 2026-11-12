@@ -27,14 +27,12 @@
         <tr>
           <th data-sort-col="0">Nick mask</th>
           <th>Reason</th>
-          <th>Set by</th>
-          <th data-sort-col="1">Set</th>
           <th data-sort-col="2">Expires</th>
           <th></th>
         </tr>
       </thead>
       <tbody id="qlineTbody">
-        <tr><td colspan="6" class="table-state">⟳ loading…</td></tr>
+        <tr><td colspan="4" class="table-state">⟳ loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -74,11 +72,28 @@
     </div>
   </div>
 </div>
+<!-- Details drawer -->
+<div class="drawer-backdrop" id="qlineDrawerBackdrop"></div>
+<div class="drawer" id="qlineDrawer">
+  <div class="drawer-header">
+    <span class="drawer-title" id="qlineDrawerTitle">Q-Line</span>
+    <button class="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="detail-grid kv-grid" id="qlineDrawerGrid"></div>
+    <div class="section-title">Reason</div>
+    <div class="detail-val prose" id="qlineDrawerReason"></div>
+  </div>
+  <div class="drawer-footer" id="qlineDrawerFooter"></div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
 const CAN_DEL = {{ 'true' if can('ban_del') else 'false' }};
+
+let qlineMap = {};
 
 // ── Load ─────────────────────────────────────────────────────────────────
 async function loadQlines() {
@@ -87,9 +102,11 @@ async function loadQlines() {
     document.getElementById('qlineCount').textContent =
       entries.length + ' Q-Line' + (entries.length === 1 ? '' : 's');
 
+    qlineMap = {};
+    entries.forEach((q, i) => { qlineMap[i] = q; });
     if (!entries.length) { Panel.renderTable('qlineTbody', [], 'No Q-Lines'); return; }
 
-    Panel.renderTable('qlineTbody', entries.map(q => {
+    Panel.renderTable('qlineTbody', entries.map((q, i) => {
       const name    = q.name || '?';
       const reason  = q.reason || '—';
       const setBy   = q.set_by || '—';
@@ -99,14 +116,13 @@ async function loadQlines() {
       const expireTs = q.expire_at ? new Date(q.expire_at).getTime() : 9999999999999;
 
       return `<tr data-search="${Panel.esc(name)} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
-                  data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${expireTs}">
+                  data-sort0="${Panel.esc(name.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${expireTs}"
+                  style="cursor:pointer" onclick="openQlineDrawer(${i})">
         <td class="td-mono td-main">${Panel.esc(name)}</td>
-        <td class="text-muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+        <td class="text-muted" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
             title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
-        <td class="td-mono text-muted">${Panel.esc(setBy)}</td>
-        <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
-        <td class="td-mono text-muted">${Panel.esc(expires)}</td>
-        <td>
+        <td class="td-mono text-muted" style="white-space:nowrap">${Panel.esc(expires)}</td>
+        <td onclick="event.stopPropagation()" style="white-space:nowrap">
           ${CAN_DEL && q.set_in_config ? Panel.CONFIG_BADGE : ''}
           ${CAN_DEL && !q.set_in_config ? `<button class="btn btn-danger btn-sm" onclick="deleteQline(${Panel.jsArg(name)})">remove</button>` : ''}
         </td>
@@ -119,11 +135,45 @@ async function loadQlines() {
   } catch(e) { Panel.tableErrorState('qlineTbody', e.message); }
 }
 
+function when(ts) {
+  return ts ? Panel.fmtDate(ts) + ' ' + Panel.fmtTime(ts) + ' (' + Panel.fmtRelative(ts) + ')' : null;
+}
+function setFooter(id, entry, buttonsHtml) {
+  const f = document.getElementById(id);
+  f.innerHTML = entry.set_in_config
+    ? `${Panel.CONFIG_BADGE} <span class="text-muted" style="font-size:12px">Set in the configuration file; remove it there and rehash.</span>`
+    : buttonsHtml;
+  f.style.display = f.innerHTML.trim() ? '' : 'none';
+}
+
+function openQlineDrawer(i) {
+  const q = qlineMap[i];
+  if (!q) return;
+  const name = q.name || '';
+  document.getElementById('qlineDrawerTitle').textContent = name || 'Q-Line';
+  document.getElementById('qlineDrawerGrid').innerHTML = Panel.detailRows([
+    ['nick mask', q.name],
+    ['type',      q.type_string],
+    ['id',        q.id],
+    ['set by',    q.set_by],
+    ['set',       when(q.set_at)],
+    ['expires',   q.expire_at ? when(q.expire_at) : 'never (permanent)'],
+    ['duration',  q.duration_string],
+    ['hits',      q.hits],
+    ['last hit',  q.last_hit_at ? when(q.last_hit_at) : (typeof q.hits === 'number' ? 'never' : null)],
+  ]);
+  document.getElementById('qlineDrawerReason').textContent = q.reason || '—';
+  setFooter('qlineDrawerFooter', q,
+    CAN_DEL ? `<button class="btn btn-danger" onclick="deleteQline(${Panel.jsArg(name)},true)">Remove</button>` : '');
+  Panel.openDrawer('qlineDrawer');
+}
+
 // ── Delete ────────────────────────────────────────────────────────────────
-async function deleteQline(name) {
+async function deleteQline(name, fromDrawer) {
   Panel.confirm('Remove Q-Line', `Remove Q-Line for "${name}"?`, async () => {
     try {
       await Panel.apiDelete('/api/qlines/' + encodeURIComponent(name));
+      if (fromDrawer) Panel.closeDrawer('qlineDrawer');
       Panel.toast('Q-Line removed', 'ok');
       loadQlines();
     } catch(e) { Panel.toast(e.message, 'error'); }

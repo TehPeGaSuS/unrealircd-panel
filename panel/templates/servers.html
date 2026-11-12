@@ -18,24 +18,45 @@
   <div class="table-outer">
     <table>
       <thead>
-        <tr><th data-sort-col="0">Server</th><th data-sort-col="1">Users</th><th>Version</th><th>Uplink</th><th></th></tr>
+        <tr><th data-sort-col="0">Server</th><th data-sort-col="1">Users</th><th>Version</th><th>Uplink</th><th data-sort-col="2">Up</th><th></th></tr>
       </thead>
       <tbody id="srvTbody">
-        <tr><td colspan="5" class="table-state">⟳ loading…</td></tr>
+        <tr><td colspan="6" class="table-state">⟳ loading…</td></tr>
       </tbody>
     </table>
   </div>
+</div>
+
+<!-- Details drawer -->
+<div class="drawer-backdrop" id="srvDrawerBackdrop"></div>
+<div class="drawer" id="srvDrawer">
+  <div class="drawer-header">
+    <span class="drawer-title" id="srvDrawerTitle">Server</span>
+    <button class="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="detail-grid kv-grid" id="srvDrawerGrid"></div>
+    <div class="section-title" id="srvModulesTitle">Modules</div>
+    <div id="srvModules" class="text-muted" style="font-size:12px">—</div>
+  </div>
+  {% if can('rehash') %}
+  <div class="drawer-footer"><button class="btn btn-ghost" id="srvDrawerRehash">Rehash</button></div>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+let srvMap = {};
+
 async function loadServers() {
   try {
     const srvs = await Panel.apiGet('/api/servers');
     document.getElementById('srvCount').textContent = srvs.length + ' server' + (srvs.length !== 1 ? 's' : '');
+    srvMap = {};
+    srvs.forEach((s, i) => { srvMap[i] = s; });
     if (!srvs.length) { Panel.renderTable('srvTbody', [], 'No servers'); return; }
-    Panel.renderTable('srvTbody', srvs.map(s => {
+    Panel.renderTable('srvTbody', srvs.map((s, i) => {
       const name    = s.name || '?';
       // UnrealIRCd returns user count nested under server.users_online or at top level
       const users   = s.server?.num_users ?? '—';
@@ -43,16 +64,72 @@ async function loadServers() {
       const rawVer  = s.server?.features?.software || '';
       const version = rawVer ? rawVer.replace(/^UnrealIRCd-/i, '') : '—';
       const uplink  = s.server?.uplink || '—';
-      return '<tr data-search="' + Panel.esc(name) + '" data-sort0="' + Panel.esc(name.toLowerCase()) + '" data-sort1="' + (isNaN(users) ? -1 : users) + '">'
+      const boot    = s.server?.boot_time;
+      const up      = boot ? Panel.fmtRelative(boot).replace(/ ago$/, '') : '—';
+      const bootTs  = boot ? new Date(boot).getTime() : 0;
+      return '<tr data-search="' + Panel.esc(name) + '" data-sort0="' + Panel.esc(name.toLowerCase()) + '" data-sort1="' + (isNaN(users) ? -1 : users) + '" data-sort2="' + (bootTs ? -bootTs : 0) + '" style="cursor:pointer" onclick="openSrvDrawer(' + i + ')">'
         + '<td class="td-main td-mono">' + Panel.esc(name) + '</td>'
         + '<td class="td-mono">' + users + '</td>'
         + '<td class="td-mono text-muted">' + Panel.esc(version) + '</td>'
         + '<td class="td-mono text-muted">' + Panel.esc(uplink) + '</td>'
-        + '<td><button class="btn btn-ghost btn-sm" onclick="doRehash(' + Panel.jsArg(name) + ')">rehash</button></td>'
+        + '<td class="td-mono text-muted" style="white-space:nowrap">' + Panel.esc(up) + '</td>'
+        + '<td onclick="event.stopPropagation()">' + (CAN_REHASH ? '<button class="btn btn-ghost btn-sm" onclick="doRehash(' + Panel.jsArg(name) + ')">rehash</button>' : '') + '</td>'
         + '</tr>';
     }));
     Panel.initSortableTable('srvTbody');
   } catch(e) { Panel.tableErrorState('srvTbody', e.message); }
+}
+
+// ── Details drawer ────────────────────────────────────────────────────────
+function when(ts) {
+  return ts ? Panel.fmtDate(ts) + ' ' + Panel.fmtTime(ts) + ' (' + Panel.fmtRelative(ts) + ')' : null;
+}
+
+function openSrvDrawer(i) {
+  const s = srvMap[i];
+  if (!s) return;
+  const srv = s.server || {}, f = srv.features || {};
+  document.getElementById('srvDrawerTitle').textContent = s.name || 'Server';
+  document.getElementById('srvDrawerGrid').innerHTML = Panel.detailRows([
+    ['name',        s.name],
+    ['sid',         s.id],
+    ['description', srv.info, {prose: true}],
+    ['software',    f.software],
+    ['protocol',    f.protocol],
+    ['users',       srv.num_users],
+    ['uplink',      srv.uplink],
+    ['booted',      when(srv.boot_time)],
+    ['linked',      s.connected_since && srv.uplink ? when(s.connected_since) : null],
+    ['synced',      srv.synced === undefined ? null : (srv.synced ? 'yes' : 'no (still syncing)')],
+    ['u-lined',     srv.ulined ? 'yes (services)' : null],
+    ['user modes',  f.usermodes],
+    ['chan modes',  Array.isArray(f.chanmodes) ? f.chanmodes.join(',') : f.chanmodes],
+    ['rpc modules', Array.isArray(f.rpc_modules) ? f.rpc_modules.length + ' loaded' : null],
+  ]);
+  const btn = document.getElementById('srvDrawerRehash');
+  if (btn) btn.onclick = () => doRehash(s.name);
+  loadModules(s.name);
+  Panel.openDrawer('srvDrawer');
+}
+
+async function loadModules(name) {
+  const box = document.getElementById('srvModules');
+  const title = document.getElementById('srvModulesTitle');
+  title.textContent = 'Modules'; box.textContent = '⟳ loading…';
+  try {
+    const mods = await Panel.apiGet('/api/servers/' + encodeURIComponent(name) + '/modules');
+    const third = mods.filter(m => m.third_party);
+    title.textContent = `Modules (${mods.length}${third.length ? ', ' + third.length + ' third-party' : ''})`;
+    const row = m => `<div style="padding:3px 0;border-bottom:1px solid var(--border)">
+        <span class="td-mono" style="color:var(--text)">${Panel.esc(m.name)}</span>
+        <span class="td-mono">${Panel.esc(m.version || '')}</span>
+        ${m.third_party ? '<span class="badge badge-amber">third-party</span>' : ''}
+        <div style="font-size:11px">${Panel.esc(m.description || '')}</div></div>`;
+    const sorted = [...mods].sort((a, b) => (b.third_party - a.third_party) || a.name.localeCompare(b.name));
+    box.innerHTML = sorted.length ? sorted.map(row).join('') : 'No modules reported.';
+  } catch(e) {
+    box.textContent = 'Could not load modules: ' + e.message;
+  }
 }
 
 function doRehash(name) {
@@ -64,6 +141,7 @@ function doRehash(name) {
   }, false);
 }
 
+const CAN_REHASH = {{ 'true' if can('rehash') else 'false' }};
 loadServers();
 </script>
 {% endblock %}

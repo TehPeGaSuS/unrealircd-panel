@@ -28,14 +28,12 @@
           <th data-sort-col="0">Mask</th>
           <th>Exempts from</th>
           <th>Reason</th>
-          <th>Set by</th>
-          <th data-sort-col="1">Set</th>
           <th data-sort-col="2">Expires</th>
           <th></th>
         </tr>
       </thead>
       <tbody id="elineTbody">
-        <tr><td colspan="7" class="table-state">⟳ loading…</td></tr>
+        <tr><td colspan="5" class="table-state">⟳ loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -82,6 +80,21 @@
     </div>
   </div>
 </div>
+<!-- Details drawer -->
+<div class="drawer-backdrop" id="elineDrawerBackdrop"></div>
+<div class="drawer" id="elineDrawer">
+  <div class="drawer-header">
+    <span class="drawer-title" id="elineDrawerTitle">Exception</span>
+    <button class="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="detail-grid kv-grid" id="elineDrawerGrid"></div>
+    <div class="section-title">Reason</div>
+    <div class="detail-val prose" id="elineDrawerReason"></div>
+  </div>
+  <div class="drawer-footer" id="elineDrawerFooter"></div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -133,6 +146,8 @@ function typesToString(types) {
   return [...(types||'')].map(c => ELINE_TYPES[c]||c).join(', ') || '—';
 }
 
+let elineMap = {};
+
 // ── Load ─────────────────────────────────────────────────────────────────
 async function loadElines() {
   try {
@@ -140,10 +155,12 @@ async function loadElines() {
     document.getElementById('elineCount').textContent =
       entries.length + ' exception' + (entries.length === 1 ? '' : 's');
 
+    elineMap = {};
+    entries.forEach((e, i) => { elineMap[i] = e; });
     if (!entries.length) { Panel.renderTable('elineTbody', [], 'No ban exceptions'); return; }
 
-    Panel.renderTable('elineTbody', entries.map(e => {
-      const mask    = e.name || '?';
+    Panel.renderTable('elineTbody', entries.map((e, i) => {
+      const mask    = e.name || (e.match ? '(match block)' : '?');
       const types   = e.exception_types || '';
       const reason  = e.reason || '—';
       const setBy   = e.set_by || '—';
@@ -154,18 +171,17 @@ async function loadElines() {
       const isSoft   = mask.startsWith('%');
 
       return `<tr data-search="${Panel.esc(mask)} ${Panel.esc(typesToString(types))} ${Panel.esc(reason)} ${Panel.esc(setBy)}"
-                  data-sort0="${Panel.esc(mask.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${expireTs}">
+                  data-sort0="${Panel.esc(mask.toLowerCase())}" data-sort1="${setAtTs}" data-sort2="${expireTs}"
+                  style="cursor:pointer" onclick="openElineDrawer(${i})">
         <td class="td-mono td-main">
           ${Panel.esc(mask)}
           ${isSoft ? '<span class="badge badge-muted" style="font-size:9px" title="Soft: identified users only">soft</span>' : ''}
         </td>
         <td style="white-space:normal;line-height:1.9">${typesToTags(types)}</td>
-        <td class="text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+        <td class="text-muted" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
             title="${Panel.esc(reason)}">${Panel.esc(reason)}</td>
-        <td class="td-mono text-muted">${Panel.esc(setBy)}</td>
-        <td class="td-mono text-muted">${Panel.esc(setAt)}</td>
-        <td class="td-mono text-muted">${Panel.esc(expires)}</td>
-        <td>
+        <td class="td-mono text-muted" style="white-space:nowrap">${Panel.esc(expires)}</td>
+        <td onclick="event.stopPropagation()" style="white-space:nowrap">
           ${CAN_DEL && e.set_in_config ? Panel.CONFIG_BADGE : ''}
           ${CAN_DEL && !e.set_in_config ? `<button class="btn btn-danger btn-sm" onclick="deleteEline(${Panel.jsArg(mask)})">remove</button>` : ''}
         </td>
@@ -178,11 +194,45 @@ async function loadElines() {
   } catch(e) { Panel.tableErrorState('elineTbody', e.message); }
 }
 
+function when(ts) {
+  return ts ? Panel.fmtDate(ts) + ' ' + Panel.fmtTime(ts) + ' (' + Panel.fmtRelative(ts) + ')' : null;
+}
+function setFooter(id, entry, buttonsHtml) {
+  const f = document.getElementById(id);
+  f.innerHTML = entry.set_in_config
+    ? `${Panel.CONFIG_BADGE} <span class="text-muted" style="font-size:12px">Set in the configuration file; remove it there and rehash.</span>`
+    : buttonsHtml;
+  f.style.display = f.innerHTML.trim() ? '' : 'none';
+}
+
+function openElineDrawer(i) {
+  const e = elineMap[i];
+  if (!e) return;
+  const mask = e.name || '';
+  document.getElementById('elineDrawerTitle').textContent = e.name || '(match block)';
+  document.getElementById('elineDrawerGrid').innerHTML = Panel.detailRows([
+    ['mask',     e.name],
+    ['match',    e.match ? JSON.stringify(e.match) : null],
+    ['soft',     mask.startsWith('%') ? 'yes, identified users only' : null],
+    ['exempts',  typesToTags(e.exception_types), {html: true}],
+    ['id',       e.id],
+    ['set by',   e.set_by],
+    ['set',      when(e.set_at)],
+    ['expires',  e.expire_at ? when(e.expire_at) : 'never (permanent)'],
+    ['duration', e.duration_string],
+  ]);
+  document.getElementById('elineDrawerReason').textContent = e.reason || '—';
+  setFooter('elineDrawerFooter', e,
+    CAN_DEL ? `<button class="btn btn-danger" onclick="deleteEline(${Panel.jsArg(mask)},true)">Remove</button>` : '');
+  Panel.openDrawer('elineDrawer');
+}
+
 // ── Delete ────────────────────────────────────────────────────────────────
-async function deleteEline(mask) {
+async function deleteEline(mask, fromDrawer) {
   Panel.confirm('Remove Exception', `Remove E-Line for "${mask}"?`, async () => {
     try {
       await Panel.apiDelete('/api/elines/' + encodeURIComponent(mask));
+      if (fromDrawer) Panel.closeDrawer('elineDrawer');
       Panel.toast('Exception removed', 'ok');
       loadElines();
     } catch(e) { Panel.toast(e.message, 'error'); }

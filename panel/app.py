@@ -536,6 +536,13 @@ def api_servers():
             servers.insert(0, local)
     return jsonify(servers)
 
+@app.route("/api/servers/<srvname>/modules")
+@permission_required("view_servers")
+def api_server_modules(srvname):
+    result, err = rpc_call(lambda c: c.server().module_list(srvname))
+    if err: return jsonify({"error": err}), 503
+    return jsonify(result.get("list", []) if isinstance(result, dict) else [])
+
 @app.route("/api/servers/<srvname>/rehash", methods=["POST"])
 @permission_required("rehash")
 def api_rehash(srvname):

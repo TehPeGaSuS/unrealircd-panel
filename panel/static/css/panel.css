@@ -979,6 +979,22 @@ body.login-page {
   color: var(--text);
   word-break: break-all;
 }
+/* Label/value pairs in drawers and cards: label column + value column.
+   (Plain .detail-grid is also used as a card grid, so this is separate.) */
+.detail-grid.kv-grid {
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 7px 14px;
+  align-items: baseline;
+}
+@media (max-width: 420px) {
+  .detail-grid.kv-grid { grid-template-columns: 1fr; gap: 2px; }
+  .detail-grid.kv-grid .detail-val { margin-bottom: 8px; }
+}
+.detail-val.prose {
+  font-family: 'IBM Plex Sans', sans-serif;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
 .section-title {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;

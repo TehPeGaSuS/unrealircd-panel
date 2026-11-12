@@ -311,6 +311,27 @@ function jsArg(value) {
   return esc(JSON.stringify(String(value ?? '')));
 }
 
+// Rows for a details drawer (.detail-grid): [[label, value, opts], ...].
+// Rows whose value is null/undefined/'' are skipped. Values are escaped unless
+// opts.html; opts.prose shows wrapping sans-serif text (reasons, descriptions).
+function detailRows(rows) {
+  return rows
+    .filter(r => r && r[1] !== undefined && r[1] !== null && r[1] !== '')
+    .map(([key, value, opts = {}]) =>
+      `<span class="detail-key">${esc(key)}</span>` +
+      `<span class="detail-val${opts.prose ? ' prose' : ''}">${opts.html ? value : esc(value)}</span>`)
+    .join('');
+}
+
+// "in 3d 4h" / "2h ago" style relative time for an ISO timestamp
+function fmtRelative(ts) {
+  if (!ts) return '';
+  const secs = Math.round((new Date(ts).getTime() - Date.now()) / 1000);
+  const a = Math.abs(secs), days = Math.floor(a / 86400);
+  const d = days > 0 ? `${days}d ${Math.floor((a % 86400) / 3600)}h` : fmtDuration(a);
+  return secs >= 0 ? 'in ' + d : d + ' ago';
+}
+
 // Strip mIRC/IRC formatting codes before display
 //  bold,  color (+ optional NN,NN),  reset,
 //  monospace,  reverse,  italic,  strikethrough,  underline
@@ -340,7 +361,7 @@ window.Panel = {
   api, apiGet, apiPost, apiDelete,
   toast, openModal, closeModal,
   renderTable, tableLoadingState, tableErrorState, initTableSearch, initSortableTable,
-  confirm, fmtTime, fmtDate, fmtDuration, esc, jsArg, stripIrc, CONFIG_BADGE,
+  confirm, fmtTime, fmtDate, fmtDuration, fmtRelative, detailRows, esc, jsArg, stripIrc, CONFIG_BADGE,
 };
 
 // ============================================================
