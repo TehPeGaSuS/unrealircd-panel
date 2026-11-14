@@ -15,6 +15,7 @@ object_detail_level:
 """
 
 from __future__ import annotations
+import re
 from typing import TYPE_CHECKING, Any, List, Optional
 
 if TYPE_CHECKING:
@@ -515,14 +516,28 @@ class Whowas(_Namespace):
         ip: Optional[str] = None,
         object_detail_level: int = 2,
     ) -> List[Any]:
-        """Nick history (WHOWAS); filter by nick and/or IP, or neither for all."""
+        """Nick history (WHOWAS); filter by nick and/or IP, or neither for all.
+
+        The IP filter is applied here rather than sent as the ``ip`` param:
+        UnrealIRCd before 6.2.8-rc1 (b939f67e1) crashes on ``whowas.get``
+        with an ``ip`` filter when any whowas entry has no IP.
+        """
         params: dict = {"object_detail_level": object_detail_level}
         if nick:
             params["nick"] = nick
-        if ip:
-            params["ip"] = ip
         result = self._q("whowas.get", params)
-        return result.get("list", []) if isinstance(result, dict) else []
+        entries = result.get("list", []) if isinstance(result, dict) else []
+        if ip:
+            # Same semantics as match_simple(): case-insensitive, * and ?.
+            rx = re.compile(
+                "".join(".*" if ch == "*" else "." if ch == "?" else re.escape(ch)
+                        for ch in ip) + r"\Z",
+                re.IGNORECASE | re.DOTALL,
+            )
+            entries = [e for e in entries
+                       if isinstance(e, dict) and e.get("ip")
+                       and rx.match(e["ip"])]
+        return entries
 
 
 # ---------------------------------------------------------------------------
